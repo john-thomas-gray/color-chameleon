@@ -185,7 +185,7 @@ enemy variants are not included in this milestone.
 - [x] Preserve unlocks, development overrides, and cleared-color exclusions.
   Individual Purple summons and Yellow transformations retain existing rules.
 - [x] Verify full editor and Play mode suites for the grouped formations.
-- [ ] Move the Unity project to `/Users/johngray/swe/candy-cruisers`, preserve
+- [x] Move the Unity project to `/Users/johngray/swe/candy-cruisers`, preserve
   the old checkout and history, and publish the V2.0.0 source release.
 
 ### Later Features Still Pending
