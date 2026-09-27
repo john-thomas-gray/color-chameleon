@@ -47,6 +47,7 @@ namespace CandyCruisers.Editor
             SpawnPresentationChecks.Run();
             RowCompositionChecks.Run();
             CombatTuningChecks.Run();
+            FleetTickChecks.Run();
             PlayfieldFrameChecks.Run();
             YellowTransformationChecks.Run();
             SpecialEnemyChecks.Run();

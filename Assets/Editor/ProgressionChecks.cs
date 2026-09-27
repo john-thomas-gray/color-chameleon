@@ -92,6 +92,7 @@ namespace CandyCruisers.Editor
                 movement.enabled = false;
                 float shortest = float.MaxValue, longest = 0;
                 int resampled = 0;
+                var greenRange = CombatBalance.CooldownRange(EnemyColor.Green, session.Progress.Level);
                 for (int sample = 0; sample < 24; sample++)
                 {
                     var timed = Add(grid, EnemyColor.Green, 2, 0).GetComponent<EnemyAbilities>();
@@ -99,14 +100,16 @@ namespace CandyCruisers.Editor
                     timed.Tick(.8f);
                     timed.Tick(.18f);
                     float subsequent = UntilGreenWarning(timed) + .18f;
-                    Check(initial >= 5.9f && initial <= 15.1f && subsequent >= 5.9f && subsequent <= 15.1f,
-                        "Initial and repeated Green cooldowns stay within 6-15 seconds");
+                    Check(initial >= greenRange.x - .1f && initial <= greenRange.y + .1f &&
+                        subsequent >= greenRange.x - .1f && subsequent <= greenRange.y + .1f,
+                        "Initial and repeated Green cooldowns stay within the configured range");
                     shortest = Mathf.Min(shortest, initial);
                     longest = Mathf.Max(longest, initial);
                     if (Mathf.Abs(initial - subsequent) > .5f) resampled++;
                     Empty(grid);
                 }
-                Check(longest - shortest > 6 && resampled > 12, "Greens use widely staggered, freshly sampled cooldowns");
+                Check(longest - shortest > (greenRange.y - greenRange.x) * .66f && resampled > 12,
+                    "Greens use staggered, freshly sampled cooldowns across the configured range");
                 movement.enabled = true;
 
                 var yellow = Add(grid, EnemyColor.Yellow, 2, 0);

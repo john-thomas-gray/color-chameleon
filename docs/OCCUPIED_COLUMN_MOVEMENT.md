@@ -17,6 +17,22 @@ per second per Green, multiplied by level scaling. Zero Greens means no motion.
 The numerical timing examples below assume one Green at level-one speed.
 `UseGreenDashes` retains the previous nonzero-base-speed mode, disabled by default.
 
+### Discrete Steps
+
+The fleet banks that same speed as distance, moving in 0.15-unit steps instead
+of translating every frame. `EnemyGridMovement.stepDistance` controls the size;
+the time between steps is the step distance divided by the current speed.
+Changes to Green count or level affect newly accumulated distance immediately.
+The unfinished distance carries into the next frame, so average speed is unchanged.
+The final step at an edge can be shorter to preserve exact boundary timing.
+
+Each step flashes one live Green using `EnemyPresentation.MovementPulse`.
+The rotation starts in row/column order, then repeats; removed or recolored
+Greens are skipped and newly appearing Greens join the queue. Both ordinary
+and special Greens participate. The pulse changes only presentation tint,
+not collision geometry or ability cooldowns. Special-Green dashes remain a
+separate ability. Pause preserves partial step progress; a new wave resets it.
+
 ## Geometry
 
 The playfield edges are x = -3 and x = +3, shared with player wrapping and the

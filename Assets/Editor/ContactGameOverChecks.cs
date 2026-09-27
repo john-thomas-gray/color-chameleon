@@ -62,11 +62,20 @@ namespace CandyCruisers.Editor
                 ProgressionChecks.Add(grid, EnemyColor.Red, 2, GridModel.Rows - 2);
                 Check(!session.CheckPlayerContact(), "The previous boundary row does not touch the player");
                 Check(player.Hit(), "Enter recovery");
-                Add(grid, 2);
+                var bottom = Add(grid, 2);
                 Check(!session.CheckPlayerContact(), "Absent recovering player has no contact");
                 player.TickSurvival(1.5f);
-                Check(player.Invulnerable && session.CheckPlayerContact() && player.Lives == PlayerMovement.MaxLives - 2,
-                    "Missile protection does not prevent contact damage after respawn");
+                int protectedLives = player.Lives;
+                Check(player.Invulnerable && !session.CheckPlayerContact() && player.Lives == protectedLives,
+                    "Respawn protection prevents occupied-row contact damage");
+                float protectedX = player.transform.position.x;
+                player.Move(1, .1f);
+                Check(player.transform.position.x > protectedX && player.Lives == protectedLives,
+                    "Respawn protection lets the player move away from occupied-row contact");
+                player.transform.position = new Vector3(bottom.transform.position.x, -4.6f, 0);
+                player.TickSurvival(1.6f);
+                Check(!player.Invulnerable && session.CheckPlayerContact() && player.Lives == protectedLives - 1,
+                    "Occupied-row contact applies again after respawn protection expires");
             });
             Fixture((grid, player, session) =>
             {
@@ -81,7 +90,7 @@ namespace CandyCruisers.Editor
                 Check(session.CheckPlayerContact() && player.Lives == 0 && session.State == GameSession.RunState.Dying &&
                     player.ControlsLocked, "Final contact starts death and locks controls");
             });
-            Debug.Log("Contact game-over checks passed: bottom capacity, continued sweeping, contact lives, pause, long moves, wrap and recovery.");
+            Debug.Log("Contact game-over checks passed: bottom capacity, continued sweeping, contact lives, invulnerable respawn, pause, long moves, wrap and recovery.");
         }
         private static GridEnemy Add(EnemyGrid grid, int column) => ProgressionChecks.Add(grid, EnemyColor.Red, column, GridModel.Rows - 1);
         private static void Fixture(Action<EnemyGrid, PlayerMovement, GameSession> test) =>

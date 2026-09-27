@@ -18,6 +18,16 @@ namespace CandyCruisers
         private EnemyColor imitationColor;
         private bool linkedImitation;
         private float revealRemaining;
+        private float movementPulseRemaining;
+        public const float MovementPulseSeconds = .38f;
+        private LineRenderer[] surgeGlow, surgeCore;
+        public void MovementPulse()
+        {
+            if (body == null) return;
+            EnsureSurge();
+            movementPulseRemaining = MovementPulseSeconds;
+            Tick(0, EnemyColor.Green, 0);
+        }
         private Quaternion restingRotation;
         private bool aimingApplied;
         public void AimRed(Vector3 direction, bool aiming, float seconds, bool firing = false)
@@ -93,11 +103,16 @@ namespace CandyCruisers
             shiftRemaining = Mathf.Max(0, shiftRemaining - seconds);
             imitationRemaining = Mathf.Max(0, imitationRemaining - seconds);
             revealRemaining = Mathf.Max(0, revealRemaining - seconds);
+            movementPulseRemaining = Mathf.Max(0, movementPulseRemaining - seconds);
             float assimilation = 1 - imitationRemaining / EnemyAbilities.ImitationSeconds;
             Color tint = EnemyPalette.Get(color);
             Color brilliant = color == EnemyColor.Purple ? new Color(1, .3f, 1) :
                 color == EnemyColor.Green ? new Color(.65f, 1, .75f) : Color.white;
             body.color = Color.Lerp(tint, brilliant, warning * (.6f + .4f * Mathf.Sin(clock * 28)));
+            if (color == EnemyColor.Green && movementPulseRemaining > 0)
+                body.color = Color.Lerp(body.color, new Color(.85f, 1, .9f),
+                    Mathf.Min(1, movementPulseRemaining * 8));
+            PresentMovementSurge(color);
             if (phaseRemaining > 0) body.color = new Color(body.color.r, body.color.g, body.color.b, SpawnOpacity);
             portal.enabled = phaseRemaining > 0;
             if (portal.enabled)
@@ -148,15 +163,73 @@ namespace CandyCruisers
                 body.color = Color.Lerp(EnemyPalette.Get(EnemyColor.Yellow), Color.white,
                     .5f + .5f * Mathf.Cos((.5f - revealRemaining) * Mathf.PI * 12));
         }
+        private void EnsureSurge()
+        {
+            if (surgeGlow != null) return;
+            surgeGlow = new LineRenderer[5];
+            surgeCore = new LineRenderer[5];
+            for (int i = 0; i < surgeGlow.Length; i++)
+            {
+                surgeGlow[i] = Line("Green surge glow " + i, i == 0 ? 25 : 7, .065f);
+                surgeCore[i] = Line("Green surge core " + i, i == 0 ? 25 : 7, .018f);
+                surgeGlow[i].useWorldSpace = surgeCore[i].useWorldSpace = false;
+                surgeCore[i].sortingOrder++;
+            }
+        }
+
+        private void PresentMovementSurge(EnemyColor color)
+        {
+            if (surgeGlow == null) return;
+            bool active = color == EnemyColor.Green && movementPulseRemaining > 0;
+            float age = MovementPulseSeconds - movementPulseRemaining;
+            float fade = Mathf.Min(1, movementPulseRemaining / .12f);
+            float radius = Mathf.Max(body.bounds.extents.x, body.bounds.extents.y);
+            int frame = Mathf.FloorToInt(age * 24);
+            for (int arc = 0; arc < surgeGlow.Length; arc++)
+            {
+                var glow = surgeGlow[arc];
+                var core = surgeCore[arc];
+                glow.enabled = core.enabled = active;
+                if (!active) continue;
+                glow.startColor = glow.endColor = new Color(.05f, 1, .2f, .9f * fade);
+                core.startColor = core.endColor = new Color(.8f, 1, .65f, fade);
+                for (int i = 0; i < glow.positionCount; i++)
+                {
+                    float t = (float)i / (glow.positionCount - 1);
+                    // Deterministic flicker never consumes the gameplay random sequence.
+                    float jitter = Mathf.Sin((i % 24) * 17.7f + arc * 9.3f + frame * 13.1f);
+                    Vector3 offset;
+                    if (arc == 0)
+                    {
+                        float angle = t * Mathf.PI * 2;
+                        float reach = radius * (1.14f + .22f * jitter);
+                        offset = new Vector3(Mathf.Cos(angle), Mathf.Sin(angle)) * reach;
+                    }
+                    else
+                    {
+                        float angle = arc * Mathf.PI * .5f + .35f * Mathf.Sin(frame * 2 + arc);
+                        var outward = new Vector3(Mathf.Cos(angle), Mathf.Sin(angle));
+                        var side = new Vector3(-outward.y, outward.x);
+                        offset = outward * radius * (.8f + t * 1.05f) + side * radius * jitter * .27f;
+                    }
+                    Vector3 point = glow.transform.InverseTransformPoint(body.bounds.center + offset);
+                    glow.SetPosition(i, point);
+                    core.SetPosition(i, point);
+                }
+            }
+        }
+
         public void Clear()
         {
             if (aimingApplied && body != null) body.transform.localRotation = restingRotation;
             aimingApplied = false;
-            phaseRemaining = shiftRemaining = imitationRemaining = revealRemaining = 0;
+            phaseRemaining = shiftRemaining = imitationRemaining = revealRemaining = movementPulseRemaining = 0;
             linkedImitation = false;
             target = null;
             if (tendril == null) return;
             tendril.enabled = portal.enabled = streak.enabled = imitation.enabled = false;
+            if (surgeGlow != null)
+                for (int i = 0; i < surgeGlow.Length; i++) surgeGlow[i].enabled = surgeCore[i].enabled = false;
         }
         private void OnDisable() => Clear();
     }

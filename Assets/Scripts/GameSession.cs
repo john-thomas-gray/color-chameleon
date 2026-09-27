@@ -264,7 +264,7 @@ namespace CandyCruisers
 
         public float ContactFraction(float enemyTravelRelativeToPlayer)
         {
-            if (grid == null || State != RunState.Playing || IsPaused || player == null || !player.Alive) return 1;
+            if (grid == null || State != RunState.Playing || IsPaused || player == null || !player.Alive || player.Invulnerable) return 1;
             var target = player.HitBounds;
             float fraction = 1;
             for (int column = 0; column < GridModel.Columns; column++)
@@ -288,12 +288,12 @@ namespace CandyCruisers
         public bool CheckPlayerContact()
         {
             if (ContactFraction(0) != 0) return false;
-            return player != null && player.Hit(true);
+            return player != null && player.Hit();
         }
 
         public void FinishContactMove(float fraction)
         {
-            if (fraction < 1) player.Hit(true);
+            if (fraction < 1) player.Hit();
             else CheckPlayerContact();
         }
 

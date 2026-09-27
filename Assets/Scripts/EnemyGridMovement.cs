@@ -7,6 +7,12 @@ namespace CandyCruisers
     {
         [SerializeField, Min(0f)] private float speed = 0.3f;
         [SerializeField] private bool useGreenDashes;
+        [SerializeField, Min(.001f)] private float stepDistance = .15f;
+        private double bankedDistance;
+        private readonly System.Collections.Generic.List<int> greenOrder = new();
+        private readonly System.Collections.Generic.HashSet<int> liveGreens = new();
+        private readonly System.Collections.Generic.HashSet<int> pulsedGreens = new();
+        public event System.Action<int> GreenPulsed;
         public bool UseGreenDashes { get => useGreenDashes; set => useGreenDashes = value; }
         private Vector3 origin;
         private bool initialized;
@@ -30,6 +36,9 @@ namespace CandyCruisers
         {
             Initialize();
             Direction = 1;
+            bankedDistance = 0;
+            greenOrder.Clear();
+            pulsedGreens.Clear();
             transform.localPosition = origin;
             resetVersion++;
         }
@@ -41,23 +50,57 @@ namespace CandyCruisers
             Initialize();
             if (!enabled || speed <= 0 || seconds <= 0 || double.IsNaN(seconds) || double.IsInfinity(seconds)) return;
             int version = resetVersion;
-            // Spend time up to each contact so new Greens affect the remaining frame.
+            // Integrate the existing speed, spending distance only on discrete steps.
             while (seconds > 0 && enabled && version == resetVersion)
             {
                 float currentSpeed = CurrentSpeed;
                 if (currentSpeed <= 0 || !grid.OccupiedHorizontalBounds(out float left, out float right) ||
-                    right - left >= 2f * PlayerMovement.HalfWidth) return;
+                    right - left >= 2f * PlayerMovement.HalfWidth)
+                { if (grid.Model.Count == 0) { bankedDistance = 0; greenOrder.Clear(); pulsedGreens.Clear(); } return; }
                 double distance = System.Math.Max(0, Direction > 0 ? PlayerMovement.HalfWidth - right : left + PlayerMovement.HalfWidth);
-                double untilContact = distance / currentSpeed;
-                if (seconds < untilContact)
+                double step = System.Math.Min(System.Math.Max(.001, stepDistance), distance);
+                double untilStep = System.Math.Max(0, step - bankedDistance) / currentSpeed;
+                if (seconds + .000001 < untilStep)
                 {
-                    AdvanceDistance(seconds * currentSpeed);
+                    bankedDistance += seconds * currentSpeed;
                     return;
                 }
-                AdvanceDistance(distance);
-                seconds -= untilContact;
-                if (distance == 0) return;
+                bankedDistance = System.Math.Max(0, bankedDistance - step);
+                seconds = System.Math.Max(0, seconds - untilStep);
+                if (step > 0) PulseNextGreen();
+                AdvanceDistance(step);
             }
+        }
+
+        private void PulseNextGreen()
+        {
+            liveGreens.Clear();
+            for (int row = 0; row < GridModel.Rows; row++)
+            for (int column = 0; column < GridModel.Columns; column++)
+            {
+                var enemy = grid.Model.At(column, row);
+                if (enemy == null || enemy.Color != EnemyColor.Green) continue;
+                liveGreens.Add(enemy.Id);
+                if (!pulsedGreens.Contains(enemy.Id) && !greenOrder.Contains(enemy.Id)) greenOrder.Add(enemy.Id);
+            }
+            greenOrder.RemoveAll(id => !liveGreens.Contains(id));
+            pulsedGreens.RemoveWhere(id => !liveGreens.Contains(id));
+            if (greenOrder.Count == 0 && liveGreens.Count > 0)
+            {
+                pulsedGreens.Clear();
+                for (int row = 0; row < GridModel.Rows; row++)
+                for (int column = 0; column < GridModel.Columns; column++)
+                {
+                    var enemy = grid.Model.At(column, row);
+                    if (enemy != null && enemy.Color == EnemyColor.Green) greenOrder.Add(enemy.Id);
+                }
+            }
+            if (greenOrder.Count == 0) return;
+            int next = greenOrder[0];
+            greenOrder.RemoveAt(0);
+            pulsedGreens.Add(next);
+            grid.View(next)?.GetComponent<EnemyPresentation>()?.MovementPulse();
+            GreenPulsed?.Invoke(next);
         }
 
         public void AdvanceDistance(double remaining)

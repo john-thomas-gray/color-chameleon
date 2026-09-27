@@ -54,24 +54,40 @@ cannot copy Orange, but special Yellow can wear an Orange disguise normally.
 
 ### Quiet Player Color Assistance
 
-`EnemyGrid.SelectablePlayerColors` filters the existing selectable colors when
-the player needs a new color. It does not add visible feedback or change an
-already-ready color just because the formation moves.
+`EnemyGrid.PlayerColorWeights` supplies both eligibility and selection weights
+when the player needs a new color. `SelectablePlayerColors` exposes the same
+eligible set. Formation changes do not replace an already-ready color.
 
-- The front-most enemy is the nearest occupied cell to the player in each
-  occupied column. Empty columns do not count. If every one of those enemies
-  is a special Blue, the next selected color is Blue, even on an uneven front.
-- Otherwise, exclude a color only when every enemy of that color is in the
-  immediately adjacent cell above a special Blue, away from the player. A gap
-  does not count. One enemy elsewhere keeps its color eligible.
-- Ordinary Blues do not trigger these rules. Selection uses logical colors,
-  not disguise artwork. The transforming-Yellow exclusion still applies.
-- Apply the rules on a new selection or reroll, never to a tongue in flight.
-  Recheck a reserved next-wave color after the fleet spawns and its special
-  groups are promoted. All remaining eligible colors retain equal random odds.
+- A barrier is a connected line of special Blues spanning the formation's
+  leftmost through rightmost occupied columns. Connections may be horizontal,
+  vertical, diagonal, or mixed. Unused outside columns do not matter; a gap
+  inside the span breaks the wall. Disconnected Blues do not form a barrier
+  merely because every column has a special Blue at its front.
+- With a barrier, select only Blue or colors represented beneath it. Each
+  column uses its lowest barrier cell, so targets below a higher section of a
+  staggered wall remain eligible. If multiple walls span the formation, the
+  nearest one in each column controls eligibility. This rule does not depend
+  on the temporary shield cooldown or activation state.
+- Non-Blue enemies immediately above a special Blue remain blocked even when
+  there is no full barrier. One exposed enemy can keep its color eligible.
+  Ordinary Blues do not create barriers. True logical colors determine
+  eligibility, and a transforming Yellow cannot make Yellow eligible.
+- For each eligible color, every on-screen enemy of that color adds `row + 1`
+  to its weight, where the top row is zero. More enemies increase a color's
+  odds, and lower rows contribute more. Eligibility and population are separate:
+  a color with no eligible target has zero weight, but once it has an eligible
+  target, its enemies above the barrier count too. A complete barrier doubles
+  Blue's combined weight as an additional preference.
+- Random selection uses the combined weights, not equal odds per color.
+  Apply it on a new selection or reroll, never to a tongue in flight. Planned
+  next-wave colors also use population and row weights, while preserving the
+  preference for a different color during refill. Recheck the reservation
+  after the fleet arrives and reroll with live weights if it is blocked.
 
 An empty board does not invent a Blue enemy or interrupt the existing next-wave
-color reservation. No cooldown, shield activation, score, or spawn rule changes.
+color reservation. Diagonal connectivity is only for barrier detection; matching
+and special promotion still use orthogonal neighbors. Cooldowns, scoring, and
+spawn rules are unchanged.
 
 ### Score And Levels
 
@@ -268,9 +284,9 @@ same displayed player color; the display also shows the stored charge count.
 The arcade-style playfield frame also follows that displayed color, including
 magic flashing, without changing the logical wrap or fleet-turn boundaries.
 
-The next successful firing consumes one charge and creates a rainbow piercing
+The next successful firing consumes all stored charges and creates a rainbow piercing
 tongue. It hits any color, bypasses shields, and clears each struck enemy's
-ordinary same-color chain. An accepted magic shot consumes a charge and fires
+ordinary same-color chain. An accepted magic shot fires
 immediately, with no wind-up or charge animation. Repeated fire is blocked while
 the shot is active, and hit/game-over cancellation stops the shot. The old
 `MagicChargePresentation` placeholder remains unused for possible future reuse.
@@ -279,9 +295,11 @@ speeds (56 and 80 world units/second), twice the previous magic speeds. It conti
 extending rather than retracting at first contact, unless that hit clears the
 fleet, in which case it immediately begins its visible return. Hits are swept over the full travel
 segment so a slow frame cannot skip intermediate enemies. Retraction does not
-deal damage. A missed or subsequently canceled shot still spends its charge;
-a rejected fire command spends nothing. New charges earned during a magic shot
-are available for following shots, not used to change the current shot.
+deal damage. A missed or subsequently canceled shot still spends all stored magic;
+a rejected fire command spends nothing. Only clearing the last enemy of a color
+during the magic shot earns magic for the next shot. Killing a chain while that
+color survives elsewhere cannot retain magic, even if multiple charges were
+stored before firing. New awards do not change the current shot.
 
 Following the original reset rules, a player hit, fleet clear, or restart removes
 stored magic. The original color-wheel visual direction is no longer part of

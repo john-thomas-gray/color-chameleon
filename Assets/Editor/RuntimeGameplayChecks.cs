@@ -129,7 +129,8 @@ namespace CandyCruisers.Editor
                     var voice = tongue.GetComponentInChildren<AudioSource>();
                     Require(voice.isPlaying && voice.loop && voice.pitch > 420f / ArcadeSoundClips.TongueFrequency && voice.volume > 0,
                         "Whistle remains audible and follows extension beyond the old clip duration");
-                    Require(grid.transform.position != gridStart, "Fleet continues moving");
+                    grid.GetComponent<EnemyGridMovement>().Tick(.5);
+                    Require(grid.transform.position != gridStart, "Fleet moves after a complete step interval");
                     // Freeze after the movement assertion so slow rendered frames cannot
                     // descend into extra rows before the separate matching assertion.
                     grid.GetComponent<EnemyGridMovement>().enabled = false;
@@ -364,6 +365,7 @@ namespace CandyCruisers.Editor
                     ContactGameOverChecks.Run();
                     PlayerDeathChecks.Run();
                     DeflectedTongueChecks.Run();
+                    FleetTickChecks.Run();
                     MissilePersistenceChecks.Run();
                     MagicMultiplierChecks.Run();
                     AimedRedChecks.Run();

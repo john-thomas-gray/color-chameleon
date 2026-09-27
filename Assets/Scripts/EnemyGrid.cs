@@ -52,28 +52,74 @@ namespace CandyCruisers
         public event System.Action<int, bool, int> OrangeBurstCleared;
         public List<EnemyColor> SelectablePlayerColors()
         {
-            var choices = Model.SelectablePlayerColors();
-            bool hasFront = false, allFrontSpecialBlue = true;
-            for (int column = 0; column < GridModel.Columns; column++)
-                for (int row = GridModel.Rows - 1; row >= 0; row--)
-                {
-                    var enemy = Model.At(column, row);
-                    if (enemy == null) continue;
-                    hasFront = true;
-                    allFrontSpecialBlue &= IsSpecialBlue(enemy);
-                    break;
-                }
-            if (hasFront && allFrontSpecialBlue) return new List<EnemyColor> { EnemyColor.Blue };
+            var choices = new List<EnemyColor>(PlayerColorWeights().Keys);
+            choices.Sort();
+            return choices;
+        }
 
-            var reachableColors = new HashSet<EnemyColor>();
+        public Dictionary<EnemyColor, int> PlayerColorWeights()
+        {
+            var weights = new Dictionary<EnemyColor, int>();
+            var eligible = new HashSet<EnemyColor>();
+            var barrier = SpecialBlueBarrierRows();
             for (int column = 0; column < GridModel.Columns; column++)
                 for (int row = 0; row < GridModel.Rows; row++)
                 {
                     var enemy = Model.At(column, row);
-                    if (enemy != null && !IsSpecialBlue(Model.At(column, row + 1))) reachableColors.Add(enemy.Color);
+                    if (enemy == null) continue;
+                    int weight = row + 1;
+                    if (barrier != null && enemy.Color == EnemyColor.Blue) weight *= 2;
+                    weights.TryGetValue(enemy.Color, out int previous);
+                    weights[enemy.Color] = previous + weight;
+                    if (enemy.Color == EnemyColor.Yellow && Model.TryGetImitationTarget(enemy.Id, out _)) continue;
+                    if (enemy.Color != EnemyColor.Blue &&
+                        (barrier != null && row <= barrier[column] || IsSpecialBlue(Model.At(column, row + 1)))) continue;
+                    eligible.Add(enemy.Color);
                 }
-            choices.RemoveAll(color => !reachableColors.Contains(color));
-            return choices;
+            foreach (var color in new List<EnemyColor>(weights.Keys))
+                if (!eligible.Contains(color)) weights.Remove(color);
+            return weights;
+        }
+
+        private int[] SpecialBlueBarrierRows()
+        {
+            if (!Model.OccupiedColumns(out int first, out int last)) return null;
+            var visited = new HashSet<int>();
+            var pending = new Queue<GridModel.Occupant>();
+            int[] barrier = null;
+            for (int column = first; column <= last; column++)
+            for (int row = 0; row < GridModel.Rows; row++)
+            {
+                var start = Model.At(column, row);
+                if (!IsSpecialBlue(start) || !visited.Add(start.Id)) continue;
+                var component = new List<GridModel.Occupant>();
+                bool touchesLeft = false, touchesRight = false;
+                pending.Enqueue(start);
+                while (pending.Count > 0)
+                {
+                    var enemy = pending.Dequeue();
+                    component.Add(enemy);
+                    touchesLeft |= enemy.Column == first;
+                    touchesRight |= enemy.Column == last;
+                    // Shield barriers connect at corners too; matching/promotion rules stay orthogonal.
+                    for (int dx = -1; dx <= 1; dx++)
+                    for (int dy = -1; dy <= 1; dy++)
+                    {
+                        var neighbor = Model.At(enemy.Column + dx, enemy.Row + dy);
+                        if (IsSpecialBlue(neighbor) && visited.Add(neighbor.Id)) pending.Enqueue(neighbor);
+                    }
+                }
+                if (!touchesLeft || !touchesRight) continue;
+                if (barrier == null)
+                {
+                    barrier = new int[GridModel.Columns];
+                    for (int i = 0; i < barrier.Length; i++) barrier[i] = -1;
+                }
+                // The nearest spanning barrier controls each column, even with multiple walls.
+                foreach (var enemy in component)
+                    barrier[enemy.Column] = Mathf.Max(barrier[enemy.Column], enemy.Row);
+            }
+            return barrier;
         }
         private bool IsSpecialBlue(GridModel.Occupant enemy) => enemy != null &&
             enemy.Color == EnemyColor.Blue && View(enemy.Id) != null && View(enemy.Id).IsSpecial;

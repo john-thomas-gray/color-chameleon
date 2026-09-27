@@ -89,9 +89,20 @@ namespace CandyCruisers.Editor
                 Check(!tongue.Active && grid.Model.Count == 1 && grid.View(survivor.Id) == survivor,
                     "Magic pierces different colors and active shields, including same-color neighbors");
                 Check(player.MagicCharges == 2, "Magic earned during piercing is capped at two");
-                Check(player.Fire() && player.MagicCharges == 1, "Another magic shot consumes only one charge");
+                for (int column = GridModel.Columns - 3; column < GridModel.Columns; column++)
+                    ProgressionChecks.Add(grid, EnemyColor.Red, column, 2);
+                Check(player.Fire() && tongue.IsMagic && player.MagicCharges == 0, "Firing consumes all stored magic");
+                for (int i = 0; i < 200 && tongue.Active; i++) tongue.Tick(step, grid);
+                Check(!tongue.Active && grid.Model.Count == 1 && grid.Model.ColorCount(EnemyColor.Red) == 1 &&
+                    player.MagicCharges == 0, "Destroying a chain cannot retain magic while its color survives elsewhere");
+                var reward = ProgressionChecks.Add(grid, EnemyColor.Yellow, 2, 0);
+                grid.ClearMatchingChain(reward.Id, EnemyColor.Yellow);
+                Check(player.Fire() && tongue.IsMagic && player.MagicCharges == 0, "A new complete color clear earns magic again");
                 tongue.Tick(10, grid);
-                Check(player.MagicCharges == 1, "Miss still spends its charge without bonus");
+                Check(player.MagicCharges == 0, "A miss cannot retain magic");
+                reward = ProgressionChecks.Add(grid, EnemyColor.Green, 2, 0);
+                grid.ClearMatchingChain(reward.Id, EnemyColor.Green);
+                Check(player.MagicCharges == 1, "Prepare stored magic before testing player damage");
                 Check(player.Hit() && player.MagicCharges == 0, "Player hit resets stored magic");
                 player.TickSurvival(4);
                 var yellow = ProgressionChecks.Add(grid, EnemyColor.Yellow, 2, 0);

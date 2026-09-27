@@ -21,19 +21,19 @@ namespace CandyCruisers.Editor
                 Check(movement.CurrentSpeed == 0 && root.transform.position == Vector3.zero, "No Greens means no motion");
                 grid.Model.SetColor(1, EnemyColor.Green);
                 Near(movement.CurrentSpeed, .03f, "One Green supplies base movement");
-                movement.Tick(1);
-                Near(root.transform.position.x, .03f, "One Green advances fleet");
+                movement.Tick(5);
+                Near(root.transform.position.x, .15f, "One Green advances one discrete step");
                 grid.Model.TryAdd(2, EnemyColor.Green, 2, 0);
                 Near(movement.CurrentSpeed, .06f, "Two Greens double movement");
-                movement.Tick(.5);
-                Near(root.transform.position.x, .06f, "Live Green count controls distance");
+                movement.Tick(2.5);
+                Near(root.transform.position.x, .3f, "Two Greens halve the step interval");
                 grid.Model.Remove(1);
                 Near(movement.CurrentSpeed, .03f, "Removing Green immediately slows fleet");
                 grid.Model.SetColor(2, EnemyColor.Blue);
                 movement.Tick(100);
-                Near(root.transform.position.x, .06f, "Converting last Green immediately stops fleet");
+                Near(root.transform.position.x, .3f, "Converting last Green immediately stops fleet");
                 movement.AdvanceDistance(1);
-                Near(root.transform.position.x, .06f, "Direct movement also respects zero Greens");
+                Near(root.transform.position.x, .3f, "Direct movement also respects zero Greens");
                 grid.Model.Remove(2);
                 movement.ResetSweep();
                 grid.ConfigureAbilities(AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Red Missile.prefab"),

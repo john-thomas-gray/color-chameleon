@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace CandyCruisers
@@ -27,12 +28,32 @@ namespace CandyCruisers
         public void PrepareNextWave(EnemyColor[] plan)
         {
             if (plan == null || plan.Length == 0) return;
-            var choices = new System.Collections.Generic.List<EnemyColor>();
-            foreach (var color in plan)
-                if (!choices.Contains(color)) choices.Add(color);
-            if (choices.Count > 1 && ReadyColor.HasValue) choices.Remove(ReadyColor.Value);
-            nextWaveColor = choices[Random.Range(0, choices.Count)];
+            var weights = new Dictionary<EnemyColor, int>();
+            int rowWidth = grid != null ? grid.GetComponent<EnemyRowSpawner>()?.RowWidthForPlan(plan) ?? plan.Length : plan.Length;
+            if (rowWidth == 0) rowWidth = plan.Length;
+            for (int i = 0; i < plan.Length; i++)
+            {
+                weights.TryGetValue(plan[i], out int previous);
+                if (plan[i] == EnemyColor.Orange && previous > 0) continue;
+                weights[plan[i]] = previous + i / rowWidth + 1;
+            }
+            if (weights.Count > 1 && ReadyColor.HasValue) weights.Remove(ReadyColor.Value);
+            nextWaveColor = ChooseColor(weights);
             RefreshColor();
+        }
+
+        private static EnemyColor? ChooseColor(Dictionary<EnemyColor, int> weights)
+        {
+            int total = 0;
+            foreach (int weight in weights.Values) total += weight;
+            if (total == 0) return null;
+            int ticket = Random.Range(0, total);
+            foreach (var choice in weights)
+            {
+                if (ticket < choice.Value) return choice.Key;
+                ticket -= choice.Value;
+            }
+            return null;
         }
         public Color DisplayColor => body != null ? body.color : Color.gray;
         public void RefreshPresentation(float time)
@@ -230,9 +251,8 @@ namespace CandyCruisers
                 ReadyColor = nextWaveColor.Value;
                 if (colors.Count > 0)
                 {
-                    var choices = grid.SelectablePlayerColors();
-                    if (choices.Count > 0 && !choices.Contains(ReadyColor.Value))
-                        ReadyColor = choices[Random.Range(0, choices.Count)];
+                    var weights = grid.PlayerColorWeights();
+                    if (!weights.ContainsKey(ReadyColor.Value)) ReadyColor = ChooseColor(weights) ?? ReadyColor;
                     nextWaveColor = null;
                 }
             }
@@ -244,8 +264,7 @@ namespace CandyCruisers
             else if (reroll || !ReadyColor.HasValue || !colors.Contains(ReadyColor.Value))
             {
                 // Keep an existing Yellow, but never newly select an all-transforming color.
-                var choices = grid.SelectablePlayerColors();
-                if (choices.Count > 0) ReadyColor = choices[Random.Range(0, choices.Count)];
+                ReadyColor = ChooseColor(grid.PlayerColorWeights()) ?? ReadyColor;
             }
             RefreshPresentation(Time.time);
         }
@@ -260,7 +279,8 @@ namespace CandyCruisers
             shotClearedColor = false;
             shotHitEnemy = false;
             ShotAccepted?.Invoke();
-            if (magic) MagicCharges--;
+            // Only a new color clear during this shot can renew magic.
+            if (magic) ResetMagic();
             CharacterVisuals.Ensure(gameObject).Fire(ReadyColor.Value);
             return true;
         }

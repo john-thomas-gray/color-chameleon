@@ -252,7 +252,7 @@ namespace CandyCruisers
             return true;
         }
 
-        private int RowWidthForPlan(EnemyColor[] plan)
+        public int RowWidthForPlan(EnemyColor[] plan)
         {
             if (plan == null || plan.Length == 0) return 0;
             int rowWidth = CurrentRowWidth;
