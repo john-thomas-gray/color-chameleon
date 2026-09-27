@@ -28,11 +28,11 @@ namespace CandyCruisers.Editor
             Directory.CreateDirectory("TestResults");
             Capture(540, 960, "empty-opening");
             var spawner = grid.GetComponent<EnemyRowSpawner>();
-            Require(spawner.SpawnBatch(spawner.PlanOpening()) && grid.transform.childCount == 2 * GridModel.Columns, "Opening spawns two rows of five");
+            Require(spawner.SpawnBatch(spawner.PlanOpening()) && grid.transform.childCount == 2 * RunProgress.StandardRowWidth, "Opening spawns two rows of five");
             foreach (var ability in grid.GetComponentsInChildren<EnemyAbilities>()) ability.Tick(1);
             foreach (Transform enemy in grid.transform)
-                Require(enemy.GetComponent<SpriteRenderer>().sprite != null, "Enemy sprite assigned");
-            Require(GameObject.Find("Star Background").GetComponent<SpriteRenderer>().sprite != null, "Background assigned");
+                Require(enemy.GetComponentInChildren<SpriteRenderer>().sprite != null, "Enemy sprite assigned");
+            Require(GameObject.Find("Star Background").GetComponentInChildren<SpriteRenderer>().sprite != null, "Background assigned");
             CoreGameplayChecks.Run();
             MatchingChecks.Run();
             DescentChecks.Run();
@@ -46,6 +46,23 @@ namespace CandyCruisers.Editor
             WaveTransitionChecks.Run();
             SpawnPresentationChecks.Run();
             RowCompositionChecks.Run();
+            CombatTuningChecks.Run();
+            PlayfieldFrameChecks.Run();
+            YellowTransformationChecks.Run();
+            SpecialEnemyChecks.Run();
+            PurpleYellowSpecialChecks.Run();
+            PresentationChecks.Run();
+            MenuChecks.Run();
+            SoundEffectsChecks.Run();
+            PlayerColorAssistChecks.Run();
+            ContactGameOverChecks.Run();
+            PlayerDeathChecks.Run();
+            DeflectedTongueChecks.Run();
+            MissilePersistenceChecks.Run();
+            MagicMultiplierChecks.Run();
+            AimedRedChecks.Run();
+            OrangeChecks.Run();
+            ComboLeaderboardBackgroundChecks.Run();
             Directory.CreateDirectory("TestResults");
             Capture(540, 960, "portrait");
             Capture(960, 540, "landscape");
@@ -56,6 +73,24 @@ namespace CandyCruisers.Editor
             tongue.Tick(0.4f);
             Capture(540, 960, "tongue-extended");
             tongue.Tick(10);
+            foreach (var enemy in grid.GetComponentsInChildren<GridEnemy>())
+                if (enemy.Color == EnemyColor.Blue)
+                {
+                    var ability = enemy.GetComponent<EnemyAbilities>();
+                    ability.BeginSpawnEffect();
+                    ability.Tick(.8f);
+                    ability.Tick(ability.CooldownRemaining);
+                    ability.Tick(.175f);
+                }
+            Capture(540, 960, "shield-powerup");
+            foreach (var enemy in grid.GetComponentsInChildren<GridEnemy>())
+                if (enemy.Color == EnemyColor.Blue) enemy.GetComponent<EnemyAbilities>().Tick(.175f);
+            Capture(540, 960, "shield-active");
+            tongue.TryFire(EnemyColor.Red, 10, true);
+            tongue.Tick(.0625f);
+            Capture(540, 960, "arcade-frame-magic");
+            Capture(960, 540, "arcade-frame-landscape");
+            tongue.Cancel();
             int colorIndex = 0;
             foreach (var enemy in grid.GetComponentsInChildren<GridEnemy>())
             {
@@ -70,7 +105,7 @@ namespace CandyCruisers.Editor
             Debug.Log("All gameplay checks passed: motion, frame timing, scene references, framing and rendering.");
         }
 
-        private static void Capture(int width, int height, string name)
+        internal static void Capture(int width, int height, string name)
         {
             var camera = Camera.main;
             var grid = GameObject.Find("Enemy Grid").transform;
@@ -84,6 +119,14 @@ namespace CandyCruisers.Editor
                 camera.targetTexture = texture;
                 camera.GetComponent<GameplayFraming>().Refresh();
                 var border = GameObject.Find("Playfield Border").GetComponent<LineRenderer>();
+                border.GetComponent<PlayfieldFrame>().Refresh();
+                foreach (var decoration in border.GetComponentsInChildren<LineRenderer>())
+                    for (int point = 0; point < decoration.positionCount; point++)
+                    {
+                        var viewport = camera.WorldToViewportPoint(decoration.transform.TransformPoint(decoration.GetPosition(point)));
+                        Require(viewport.x > .001f && viewport.x < .999f && viewport.y > .001f && viewport.y < .999f,
+                            "Entire arcade frame fits " + name);
+                    }
                 Require(border.loop && border.positionCount == 4, "Closed playfield border");
                 for (int i = 0; i < border.positionCount; i++)
                 {

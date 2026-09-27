@@ -9,18 +9,46 @@ namespace CandyCruisers
         private SpriteRenderer imitation;
         private LineRenderer tendril, portal, streak;
         private float phaseRemaining, shiftRemaining, clock;
+        private EnemyColor phaseColor;
         private int shiftDirection;
         private GridEnemy target;
         private Vector3 targetPosition;
         private float imitationRemaining;
         private Sprite oldSprite;
-        public void BeginImitation(GridEnemy neighbor, Sprite previousSprite)
+        private EnemyColor imitationColor;
+        private bool linkedImitation;
+        private float revealRemaining;
+        private Quaternion restingRotation;
+        private bool aimingApplied;
+        public void AimRed(Vector3 direction, bool aiming, float seconds, bool firing = false)
         {
+            if (body == null || !aiming && !aimingApplied) return;
+            if (!aimingApplied) restingRotation = body.transform.localRotation;
+            aimingApplied = true;
+            float angle = aiming ? Vector3.SignedAngle(Vector3.down, direction, Vector3.forward) : 0;
+            var desired = restingRotation * Quaternion.Euler(0, 0, angle);
+            body.transform.localRotation = firing ? desired : Quaternion.RotateTowards(
+                body.transform.localRotation, desired, 540f * Mathf.Max(0, seconds));
+            if (!aiming && Quaternion.Angle(body.transform.localRotation, restingRotation) < .001f)
+            { body.transform.localRotation = restingRotation; aimingApplied = false; }
+        }
+        public void BeginImitation(GridEnemy neighbor, Sprite previousSprite, bool linked = true)
+        {
+            linkedImitation = linked;
             target = neighbor;
             targetPosition = neighbor.transform.position;
             oldSprite = previousSprite;
-            imitationRemaining = 2f;
+            imitationRemaining = EnemyAbilities.ImitationSeconds;
+            imitationColor = neighbor.Color;
+            body.sprite = neighbor.Visuals.Body.sprite;
         }
+        public void DetachImitation()
+        {
+            linkedImitation = false;
+            target = null;
+            if (tendril != null) tendril.enabled = false;
+        }
+        public void RevealDisguise() => revealRemaining = .5f;
         public void Configure(SpriteRenderer renderer)
         {
             body = renderer;
@@ -29,7 +57,7 @@ namespace CandyCruisers
             portal = Line("Summoning rift", 33, .045f);
             streak = Line("Speed wake", 7, .055f);
             var overlay = new GameObject("Imitation overlay", typeof(SpriteRenderer));
-            overlay.transform.SetParent(transform, false);
+            overlay.transform.SetParent(GetComponent<GridEnemy>().Visuals.Root, false);
             imitation = overlay.GetComponent<SpriteRenderer>();
             imitation.sortingOrder = body.sortingOrder + 2;
             imitation.enabled = false;
@@ -37,7 +65,7 @@ namespace CandyCruisers
         private LineRenderer Line(string name, int count, float width)
         {
             var child = new GameObject(name, typeof(LineRenderer));
-            child.transform.SetParent(transform, false);
+            child.transform.SetParent(GetComponent<GridEnemy>().Visuals.Root, false);
             var line = child.GetComponent<LineRenderer>();
             line.sharedMaterial = body.sharedMaterial;
             line.useWorldSpace = true;
@@ -50,8 +78,9 @@ namespace CandyCruisers
         }
         public bool IsPhasing => phaseRemaining > 0;
         public float SpawnOpacity => 1 - phaseRemaining / .8f;
-        public void PhaseIn(EnemyColor color)
+        public void PhaseIn(EnemyColor color, EnemyColor? effectColor = null)
         {
+            phaseColor = effectColor ?? color;
             phaseRemaining = .8f;
             Tick(0, color, 0);
         }
@@ -63,7 +92,8 @@ namespace CandyCruisers
             phaseRemaining = Mathf.Max(0, phaseRemaining - seconds);
             shiftRemaining = Mathf.Max(0, shiftRemaining - seconds);
             imitationRemaining = Mathf.Max(0, imitationRemaining - seconds);
-            float assimilation = 1 - imitationRemaining / 2f;
+            revealRemaining = Mathf.Max(0, revealRemaining - seconds);
+            float assimilation = 1 - imitationRemaining / EnemyAbilities.ImitationSeconds;
             Color tint = EnemyPalette.Get(color);
             Color brilliant = color == EnemyColor.Purple ? new Color(1, .3f, 1) :
                 color == EnemyColor.Green ? new Color(.65f, 1, .75f) : Color.white;
@@ -72,7 +102,7 @@ namespace CandyCruisers
             portal.enabled = phaseRemaining > 0;
             if (portal.enabled)
             {
-                Color riftColor = Color.Lerp(tint, Color.white, .25f);
+                Color riftColor = Color.Lerp(EnemyPalette.Get(phaseColor), Color.white, .25f);
                 riftColor.a = Mathf.Min(1, phaseRemaining * 3);
                 portal.startColor = portal.endColor = riftColor;
                 for (int i = 0; i < portal.positionCount; i++)
@@ -90,10 +120,11 @@ namespace CandyCruisers
                 for (int i = 0; i < streak.positionCount; i++)
                     streak.SetPosition(i, transform.position + new Vector3(-shiftDirection * i * .10f, i % 2 == 0 ? -.06f : .06f, 0));
             }
-            tendril.enabled = imitation.enabled = imitationRemaining > 0;
+            tendril.enabled = imitationRemaining > 0 && linkedImitation;
+            imitation.enabled = imitationRemaining > 0;
             if (imitationRemaining > 0)
             {
-                Color destination = EnemyPalette.Get(color);
+                Color destination = EnemyPalette.Get(imitationColor);
                 Color yellow = EnemyPalette.Get(EnemyColor.Yellow);
                 body.color = Color.Lerp(yellow, destination, assimilation);
                 imitation.sprite = oldSprite;
@@ -113,10 +144,16 @@ namespace CandyCruisers
                     tendril.SetPosition(i, transform.position + delta * t * reach + side * ripple);
                 }
             }
+            if (revealRemaining > 0)
+                body.color = Color.Lerp(EnemyPalette.Get(EnemyColor.Yellow), Color.white,
+                    .5f + .5f * Mathf.Cos((.5f - revealRemaining) * Mathf.PI * 12));
         }
         public void Clear()
         {
-            phaseRemaining = shiftRemaining = imitationRemaining = 0;
+            if (aimingApplied && body != null) body.transform.localRotation = restingRotation;
+            aimingApplied = false;
+            phaseRemaining = shiftRemaining = imitationRemaining = revealRemaining = 0;
+            linkedImitation = false;
             target = null;
             if (tendril == null) return;
             tendril.enabled = portal.enabled = streak.enabled = imitation.enabled = false;

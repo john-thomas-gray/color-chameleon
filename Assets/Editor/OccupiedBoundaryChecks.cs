@@ -15,17 +15,17 @@ namespace CandyCruisers.Editor
                 movement.Tick(100);
                 Check(turns == 0 && movement.Direction == 1 && grid.transform.position.x == 0, "Empty fleet never turns or moves");
                 Fill(grid);
-                movement.Tick(3.65);
+                movement.Tick(2.4);
                 Check(turns == 0, "No turn before occupied cell reaches edge");
                 grid.Model.Remove(GridModel.Columns - 1);
                 movement.Tick(0.1);
                 Check(turns == 0 && movement.Direction == 1, "Removing leading column postpones turnaround");
                 movement.Tick(2.5);
-                Near(grid.transform.position.x, 1.875f, "Extra travel equals one empty column");
+                Near(grid.transform.position.x, 1.5f, "Extra travel equals one empty column");
                 Check(turns == 1 && movement.Direction == -1, "Turns when next occupied column touches border");
                 grid.Model.Remove(0);
-                movement.Tick(12.5);
-                Near(grid.transform.position.x, -1.875f, "Empty left column extends leftward travel");
+                movement.Tick(10);
+                Near(grid.transform.position.x, -1.5f, "Empty left column extends leftward travel");
                 Check(turns == 2 && movement.Direction == 1, "Both sides use live occupancy");
             });
             WithFleet((grid, movement) =>
@@ -33,7 +33,7 @@ namespace CandyCruisers.Editor
                 grid.Model.TryAdd(1, EnemyColor.Red, GridModel.Columns - 1, 9);
                 int turns = 0;
                 movement.SweepEnded += () => turns++;
-                movement.Tick(3.75);
+                movement.Tick(2.5);
                 Check(turns == 1, "Enemy anywhere in the column counts");
             });
             foreach (int frames in new[] { 1, 600, 1200, 2400 })
@@ -42,7 +42,7 @@ namespace CandyCruisers.Editor
                     Fill(grid);
                     int turns = 0;
                     movement.SweepEnded += () => turns++;
-                    for (int i = 0; i < frames; i++) movement.Tick(30.0 / frames);
+                    for (int i = 0; i < frames; i++) movement.Tick(20.0 / frames);
                     Near(grid.transform.position.x, 0, "Large and small frames agree");
                     Check(turns == 4 && movement.Direction == 1, "Every real contact fires once");
                 });
@@ -71,7 +71,7 @@ namespace CandyCruisers.Editor
                 movement.SweepEnded += () => { turns++; movement.enabled = false; };
                 movement.Tick(100);
                 Check(turns == 1, "Game-over callback stops further contacts in long frame");
-                Near(grid.transform.position.x, 1.125f, "Stops at first contact");
+                Near(grid.transform.position.x, .75f, "Stops at first contact");
             });
             WithFleet((grid, movement) =>
             {
@@ -97,7 +97,7 @@ namespace CandyCruisers.Editor
                 var enemy = obj.AddComponent<GridEnemy>();
                 enemy.Configure(EnemyColor.Blue, left ? 3 : 2, 0);
                 grid.Register(enemy);
-                if (left) movement.Tick(6.25); // Column 3 touches the right edge, then heads left.
+                if (left) movement.Tick(7.5); // Column 3 touches the right edge, then heads left.
                 var spawner = grid.gameObject.AddComponent<EnemyRowSpawner>();
                 spawner.Configure(blue, red);
                 int turns = 0;
@@ -108,9 +108,9 @@ namespace CandyCruisers.Editor
                     Near(enemy.transform.position.x, before, "Reindexing does not jump survivor sideways");
                     turns++;
                 };
-                movement.Tick(left ? 17.5 : 8.75);
-                Check(turns == 1 && grid.Model.Count == 1 + GridModel.Columns && enemy.Row == 1, "Exactly one descent and five new enemies");
-                Check(enemy.Column == (left ? 0 : GridModel.Columns - 1), "Survivor labels align to contacted side");
+                movement.Tick(left ? 17.5 : 10);
+                Check(turns == 1 && grid.Model.Count == 1 + RunProgress.StandardRowWidth && enemy.Row == 1, "Exactly one descent and five new enemies");
+                Check(enemy.Column == (left ? 0 : RunProgress.StandardRowWidth - 1), "Survivor labels align to contacted side");
                 grid.OccupiedHorizontalBounds(out float min, out float max);
                 Check(min >= -3.0001f && max <= 3.0001f, "Expanded row stays within playfield");
                 Check(grid.Model.At(enemy.Column, 1).Id == enemy.Id && grid.Model.ColorCount(EnemyColor.Blue) >= 1,
@@ -123,7 +123,7 @@ namespace CandyCruisers.Editor
         private static void WithFleet(Action<EnemyGrid, EnemyGridMovement> test)
         {
             var root = new GameObject("Occupied boundary fixture", typeof(EnemyGrid), typeof(EnemyGridMovement));
-            try { test(root.GetComponent<EnemyGrid>(), root.GetComponent<EnemyGridMovement>()); }
+            try { root.GetComponent<EnemyGridMovement>().UseGreenDashes = true; test(root.GetComponent<EnemyGrid>(), root.GetComponent<EnemyGridMovement>()); }
             finally { UnityEngine.Object.DestroyImmediate(root); }
         }
         private static void Near(float value, float expected, string message) => Check(Mathf.Abs(value - expected) < 0.001f, message);

@@ -9,6 +9,7 @@ namespace CandyCruisers.Editor
     {
         public static void Run()
         {
+            CheckLifeReward();
             bool previous = SpawnOverride.Enabled;
             int types = SpawnOverride.Types;
             var random = UnityEngine.Random.state;
@@ -18,7 +19,7 @@ namespace CandyCruisers.Editor
                 var grid = root.GetComponent<EnemyGrid>();
                 var spawner = root.GetComponent<EnemyRowSpawner>();
                 spawner.Configure(Prefab(EnemyColor.Blue), Prefab(EnemyColor.Red));
-                spawner.ConfigureNewTypes(Prefab(EnemyColor.Green), Prefab(EnemyColor.Purple), Prefab(EnemyColor.Yellow));
+                spawner.ConfigureNewTypes(Prefab(EnemyColor.Green), Prefab(EnemyColor.Purple), Prefab(EnemyColor.Yellow), Prefab(EnemyColor.Orange));
                 SpawnOverride.Enabled = false;
                 Check(spawner.UnlockedColors().Count == 2 && grid.SeenColors().Count == 0, "Unlocks alone do not create indicator slots");
                 SpawnOverride.Enabled = true;
@@ -42,13 +43,14 @@ namespace CandyCruisers.Editor
                     "All-locked override descends without adding forbidden enemies");
                 Check(spawner.TrySummon(purple) == null && grid.IsColorCleared(EnemyColor.Red), "Override cannot bypass lock");
                 SpawnOverride.Types = SpawnOverride.AllTypes;
-                Check(spawner.UnlockedColors().Count == 5 && grid.SeenColors().Count == 3 && grid.IsColorCleared(EnemyColor.Red),
+                Check(spawner.UnlockedColors().Count == 6 && grid.SeenColors().Count == 3 && grid.IsColorCleared(EnemyColor.Red),
                     "Unseen override colors cannot shrink earned segments");
                 foreach (var color in new[] { EnemyColor.Blue, EnemyColor.Purple })
                     while (grid.Model.ColorCount(color) > 0)
                         grid.ClearMatchingChain(grid.GetComponentsInChildren<GridEnemy>().First(e => e.Color == color).Id, color);
                 Check(grid.Model.Count == 0 && grid.IsColorCleared(EnemyColor.Red) && grid.IsColorCleared(EnemyColor.Blue) &&
-                    grid.IsColorCleared(EnemyColor.Purple), "Locks persist through the empty-fleet pause");
+                    grid.IsColorCleared(EnemyColor.Purple) && grid.AllColorClearBarsFilled,
+                    "Locks persist through the empty-fleet pause and all bars report filled");
                 Check(!spawner.SpawnBatch(0) && grid.IsColorCleared(EnemyColor.Red), "Rejected batch cannot reset the cycle");
                 Check(spawner.SpawnBatch(3), "Next batch starts a fresh cycle");
                 foreach (EnemyColor color in Enum.GetValues(typeof(EnemyColor)))
@@ -77,6 +79,32 @@ namespace CandyCruisers.Editor
             }
             Debug.Log("Color cycle checks passed: row/summon exclusion, override locks, stable eligibility counts and refill reset.");
         }
+
+        private static void CheckLifeReward()
+        {
+            foreach (bool damaged in new[] { false, true })
+            SpecialEnemyChecks.Fixture((grid, player, tongue) =>
+            {
+                var session = grid.gameObject.AddComponent<GameSession>();
+                session.Configure(player);
+                if (!Application.isPlaying) typeof(GameSession).GetMethod("OnEnable",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(session, null);
+                if (damaged)
+                {
+                    Check(player.Hit() && player.Lives == PlayerMovement.MaxLives - 1, "Fixture spends one life");
+                    player.TickSurvival(3.1f);
+                }
+                var red = ProgressionChecks.Add(grid, EnemyColor.Red, 0, 0);
+                var blue = ProgressionChecks.Add(grid, EnemyColor.Blue, 2, 0);
+                grid.ClearMatchingChain(red.Id, EnemyColor.Red);
+                Check(player.Lives == (damaged ? PlayerMovement.MaxLives - 1 : PlayerMovement.MaxLives),
+                    "Partial bar set does not grant a life");
+                grid.ClearMatchingChain(blue.Id, EnemyColor.Blue);
+                Check(grid.AllColorClearBarsFilled && player.Lives == PlayerMovement.MaxLives,
+                    damaged ? "Completing every color bar restores one life" : "Completing every color bar respects the life cap");
+            });
+        }
+
         private static GameObject Prefab(EnemyColor color) => AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/" + color + " Enemy.prefab");
         private static void Check(bool condition, string message)
         { if (!condition) throw new Exception("Color cycle check failed: " + message); }

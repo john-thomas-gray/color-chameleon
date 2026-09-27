@@ -20,18 +20,21 @@ namespace CandyCruisers.Editor
                 var blue = Add(grid, EnemyColor.Blue, 0, 1);
                 var red = Add(grid, EnemyColor.Red, 0, 0);
                 var ability = blue.GetComponent<EnemyAbilities>();
-                Check(ability.ShieldActive, "Blue starts shielded");
+                Check(!ability.ShieldActive && !ability.Absorb(EnemyColor.Red), "Ordinary Blue starts unshielded");
+                ability.Tick(ability.CooldownRemaining + .35f);
+                Check(ability.ShieldActive, "Blue powers up after its initial cooldown");
                 Check(!ability.Absorb(EnemyColor.Blue) && ability.ShieldActive, "Matching color bypasses shield");
                 var tongue = shot.GetComponent<TongueShot>();
                 shot.transform.position = new Vector3(blue.transform.position.x, -4, 0);
                 tongue.TryFire(EnemyColor.Red, 8);
                 tongue.Tick(2, grid);
                 Check(!ability.ShieldActive && grid.Model.Count == 2 && !tongue.Active, "Shield stops mismatch before enemy behind it");
-                ability.Tick(34);
+                ability.Tick(ability.CooldownRemaining * .5f);
                 Check(!ability.ShieldActive, "Shield stays down during cooldown");
-                ability.Tick(42);
-                Check(ability.ShieldActive, "Shield recharges");
-                ability.Absorb(EnemyColor.Red);
+                ability.Tick(ability.CooldownRemaining + .35f);
+                Check(!ability.ShieldActive && !ability.Absorb(EnemyColor.Red), "Spent shield never recharges");
+                for (int i = 0; i < 600; i++) ability.Tick(.1f);
+                Check(!ability.ShieldActive, "Spent shield stays down across small frame steps");
                 tongue.TryFire(EnemyColor.Red, 8);
                 tongue.Tick(2, grid);
                 Check(grid.Model.Count == 1 && grid.Model.ColorCount(EnemyColor.Red) == 0,
@@ -40,7 +43,7 @@ namespace CandyCruisers.Editor
                 tongue.TryFire(EnemyColor.Blue, 8);
                 tongue.Tick(2, grid);
                 Check(grid.Model.Count == 0 && root.GetComponentsInChildren<EnemyAbilities>().Length == 0,
-                    "Matching shot defeats shielded Blue and removes its shield");
+                    "Matching shot defeats spent Blue and removes its shield object");
 
                 var shooter = Add(grid, EnemyColor.Red, 2, 0).GetComponent<EnemyAbilities>();
                 for (int i = 0; i < 240 && !shooter.Warning; i++) shooter.Tick(0.1f);
@@ -59,7 +62,8 @@ namespace CandyCruisers.Editor
                 missile.transform.position = player.transform.position + Vector3.up * 2;
                 player.Fire();
                 missile.Tick(1);
-                Check(missile.Finished && !player.Alive && !player.Fire(), "Swept missile hit disables player");
+                Check(missile.Finished && !player.Alive && player.Lives == PlayerMovement.MaxLives - 1 && !player.Fire(),
+                    "Swept missile hit spends one life and disables player");
                 Check(!player.GetComponentInChildren<TongueShot>().Active && !player.Hit(), "Hit cancels tongue and cannot stack");
                 var position = player.transform.position;
                 player.Move(1, 1);
@@ -68,7 +72,7 @@ namespace CandyCruisers.Editor
                 Check(player.Alive && player.Invulnerable && !player.Hit() && player.Fire(), "Respawn grants temporary protection");
                 player.GetComponentInChildren<TongueShot>().Cancel();
                 player.TickSurvival(1.6f);
-                Check(!player.Invulnerable && player.Hit(), "Protection expires");
+                Check(!player.Invulnerable && player.Hit() && player.Lives == PlayerMovement.MaxLives - 2, "Protection expires");
                 player.TickSurvival(4);
                 UnityEngine.Object.DestroyImmediate(missile.gameObject);
                 var stray = UnityEngine.Object.Instantiate(projectile).GetComponent<EnemyMissile>();

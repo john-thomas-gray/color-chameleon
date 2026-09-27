@@ -14,14 +14,61 @@ namespace CandyCruisers
         private EnemyPresentation presentation;
         private float castRemaining;
         private float burstRemaining;
+        public const float ImitationSeconds = 2f;
+        private float imitationRemaining;
+        private EnemyColor? disguiseColor;
+        private Sprite undisguisedSprite;
+        private Vector3 undisguisedScale;
+        public bool IsDisguised => disguiseColor.HasValue;
+        public bool IsTransforming => imitationRemaining > 0;
+        private const float ShieldPowerSeconds = .35f;
+        private float shieldPowerRemaining;
+        private bool shieldSpent;
+        private bool awaitingSpawnShield;
+        private Vector3 shieldFullScale;
+        private bool groupShielded;
+        public void SetGroupShielded(bool value)
+        {
+            groupShielded = value;
+            if (shield != null) RefreshShield();
+        }
         public bool IsCasting => castRemaining > 0;
         public bool Suspended { get; set; }
         public bool ShieldActive { get; private set; }
-        public bool Warning => enemy != null && enemy.Color != EnemyColor.Blue && (cooldown <= 0.6f || IsCasting);
-        public Bounds ShieldBounds => shield.bounds;
-        public void BeginSpawnEffect()
+        public float CooldownRemaining => Mathf.Max(0, cooldown);
+        internal void OnPromoted()
         {
-            presentation.PhaseIn(enemy.Color);
+            if (enemy != null && enemy.Color == EnemyColor.Yellow && IsTransforming && !IsDisguised &&
+                grid.Model.TryGetImitationTarget(enemy.Id, out var target))
+            {
+                // Promotion changes the active copy into a visual-only disguise, not a combat link.
+                disguiseColor = target.Color;
+                enemy.Visuals.CopyVisualScale(grid.View(target.Id).Visuals);
+                grid.Model.CancelImitation(enemy.Id);
+                presentation.DetachImitation();
+            }
+            if (enemy == null || enemy.Color != EnemyColor.Blue) return;
+            awaitingSpawnShield = presentation.IsPhasing;
+            ShieldActive = !awaitingSpawnShield;
+            shieldPowerRemaining = awaitingSpawnShield ? ShieldPowerSeconds : 0;
+            RefreshShield();
+        }
+        private bool wasGreenDasher;
+        private bool GreenDashes => enemy != null && enemy.Color == EnemyColor.Green &&
+            (enemy.IsSpecial || grid.GetComponent<EnemyGridMovement>()?.UseGreenDashes == true);
+        public bool Warning => enemy != null && enemy.Color != EnemyColor.Blue &&
+            (enemy.Color != EnemyColor.Green || GreenDashes) && (cooldown <= .45f || IsCasting);
+        public Bounds ShieldBounds => new Bounds(enemy.HitBounds.center, enemy.HitBounds.size * 1.25f);
+        public void BeginSpawnEffect(EnemyColor? effectColor = null)
+        {
+            presentation.PhaseIn(enemy.Color, effectColor);
+            if (enemy.Color == EnemyColor.Blue)
+            {
+                ShieldActive = false;
+                awaitingSpawnShield = true;
+                shieldPowerRemaining = enemy.IsSpecial ? ShieldPowerSeconds : 0;
+                if (!enemy.IsSpecial) cooldown = NextCooldown();
+            }
             RefreshShield();
         }
 
@@ -29,7 +76,7 @@ namespace CandyCruisers
         {
             enemy = owner;
             missilePrefab = projectile;
-            body = GetComponent<SpriteRenderer>();
+            body = enemy.Visuals.Body;
             grid = GetComponentInParent<EnemyGrid>();
             presentation = GetComponent<EnemyPresentation>();
             if (presentation == null) presentation = gameObject.AddComponent<EnemyPresentation>();
@@ -37,26 +84,32 @@ namespace CandyCruisers
             if (shield == null)
             {
                 var visual = new GameObject("Shield", typeof(SpriteRenderer));
-                visual.transform.SetParent(transform, false);
+                visual.transform.SetParent(enemy.Visuals.Root, false);
                 shield = visual.GetComponent<SpriteRenderer>();
                 shield.sprite = shieldSprite;
                 shield.color = new Color(0.3f, 0.85f, 1f, 0.9f);
                 shield.sortingOrder = body.sortingOrder + 1;
-                visual.transform.localScale = Vector3.one *
-                    (Mathf.Max(body.sprite.bounds.size.x, body.sprite.bounds.size.y) * 1.25f / shieldSprite.bounds.size.x);
             }
             ResetAbility();
         }
 
         private void ResetAbility()
         {
+            RestoreDisguise();
+            grid.Model.CancelImitation(enemy.Id);
+            grid.GetComponent<EnemyRowSpawner>()?.ApplyAppearance(enemy);
             currentColor = enemy.Color;
             castRemaining = burstRemaining = 0;
+            imitationRemaining = 0;
             presentation.Clear();
-            ShieldActive = currentColor == EnemyColor.Blue;
+            ShieldActive = currentColor == EnemyColor.Blue && enemy.IsSpecial;
+            awaitingSpawnShield = false;
+            shieldPowerRemaining = 0;
+            shieldSpent = false;
             cooldown = NextCooldown();
+            wasGreenDasher = GreenDashes;
             if (shield != null && shield.sprite != null)
-                shield.transform.localScale = Vector3.one *
+                shieldFullScale = Vector3.one *
                     (Mathf.Max(body.sprite.bounds.size.x, body.sprite.bounds.size.y) * 1.25f / shield.sprite.bounds.size.x);
             RefreshVisuals();
         }
@@ -72,8 +125,36 @@ namespace CandyCruisers
         {
             if (Suspended || enemy == null || !isActiveAndEnabled) return;
             if (currentColor != enemy.Color) ResetAbility();
+            if (GreenDashes && !wasGreenDasher) cooldown = NextCooldown();
+            wasGreenDasher = GreenDashes;
             seconds = Mathf.Max(0, seconds);
-            if (burstRemaining > 0)
+            if (IsDisguised)
+            {
+                imitationRemaining = Mathf.Max(0, imitationRemaining - seconds);
+                presentation.Tick(seconds, disguiseColor.Value, 0);
+                return;
+            }
+            if (IsTransforming)
+            {
+                if (!grid.Model.TryGetImitationTarget(enemy.Id, out _))
+                {
+                    grid.SetColor(enemy.Id, EnemyColor.Yellow);
+                    ResetAbility();
+                    return;
+                }
+                imitationRemaining = Mathf.Max(0, imitationRemaining - seconds);
+                presentation.Tick(seconds, enemy.Color, 0);
+                if (imitationRemaining <= .000001f)
+                {
+                    grid.CompleteImitation(enemy.Id);
+                    ResetAbility();
+                }
+                return;
+            }
+            float shieldSeconds = awaitingSpawnShield ? Mathf.Max(0, seconds - .8f * (1 - presentation.SpawnOpacity)) : seconds;
+            if (awaitingSpawnShield && shieldSeconds > 0) awaitingSpawnShield = false;
+            if (!GreenDashes && enemy.Color == EnemyColor.Green) castRemaining = burstRemaining = 0;
+            if (burstRemaining > 0 && GreenDashes)
             {
                 float used = Mathf.Min(seconds, burstRemaining);
                 burstRemaining -= used;
@@ -86,43 +167,61 @@ namespace CandyCruisers
                 if (castRemaining <= 0) CompleteCast();
             }
             else cooldown -= seconds;
+            var player = enemy.Color == EnemyColor.Red ? FindFirstObjectByType<PlayerMovement>() : null;
+            Vector3 aimDirection = player != null && player.Alive
+                ? player.transform.position - transform.position : Vector3.down;
+            aimDirection.z = 0;
+            aimDirection = aimDirection.sqrMagnitude > .000001f ? aimDirection.normalized : Vector3.down;
+            bool aimingRed = enemy.Color == EnemyColor.Red && enemy.IsSpecial && cooldown <= .45f;
+            presentation.AimRed(aimDirection, aimingRed, seconds, aimingRed && cooldown <= 0);
             if (enemy.Color == EnemyColor.Red && cooldown <= 0)
             {
-                var missile = Instantiate(missilePrefab, transform.position + Vector3.down * 0.3f, Quaternion.identity);
-                missile.GetComponent<EnemyMissile>().SetTarget(FindFirstObjectByType<PlayerMovement>());
+                Vector3 heading = enemy.IsSpecial ? aimDirection : Vector3.down;
+                var missile = Instantiate(missilePrefab, transform.position + heading * 0.3f, Quaternion.identity);
+                var projectile = missile.GetComponent<EnemyMissile>();
+                if (enemy.IsSpecial) projectile.LaunchAimed(player, heading);
+                else projectile.SetTarget(player);
+                enemy.Visuals.Fire(enemy.Color);
                 cooldown = NextCooldown();
             }
-            else if (enemy.Color == EnemyColor.Blue && !ShieldActive && cooldown <= 0)
-                ShieldActive = true;
-            else if (enemy.Color >= EnemyColor.Green && cooldown <= 0 && !IsCasting)
+            else if (enemy.Color == EnemyColor.Blue && !shieldSpent && !ShieldActive && !awaitingSpawnShield && shieldPowerRemaining <= 0 && cooldown <= 0)
+            {
+                shieldPowerRemaining = ShieldPowerSeconds;
+                shieldSeconds = Mathf.Max(0, -cooldown);
+            }
+            else if (enemy.Color >= EnemyColor.Green && (enemy.Color != EnemyColor.Green || GreenDashes) && cooldown <= 0 && !IsCasting)
             {
                 cooldown = NextCooldown();
                 if (enemy.Color == EnemyColor.Yellow)
                 {
                     var targets = new System.Collections.Generic.List<GridEnemy>();
                     foreach (var neighbor in grid.Model.Neighbors(enemy.Column, enemy.Row))
-                        if (neighbor.Color != EnemyColor.Yellow)
+                        if (neighbor.Color != EnemyColor.Yellow && (enemy.IsSpecial || neighbor.Color != EnemyColor.Orange))
                             targets.Add(grid.View(neighbor.Id));
                     if (targets.Count > 0)
                     {
-                        var target = targets[Random.Range(0, targets.Count)];
-                        var oldSprite = body.sprite;
-                        grid.SetColor(enemy.Id, target.Color);
-                        ResetAbility();
-                        presentation.BeginImitation(target, oldSprite);
+                        BeginImitation(targets[Random.Range(0, targets.Count)]);
+                        return;
                     }
                 }
                 else if (enemy.Color == EnemyColor.Purple) CompleteCast();
-                else castRemaining = .8f;
+                else castRemaining = enemy.Color == EnemyColor.Orange ? .35f : .6f;
             }
             RefreshVisuals();
             presentation.Tick(seconds, enemy.Color, Warning ? 1 : 0);
+            if (awaitingSpawnShield && !presentation.IsPhasing) awaitingSpawnShield = false;
+            if (!awaitingSpawnShield && shieldPowerRemaining > 0)
+            {
+                shieldPowerRemaining = Mathf.Max(0, shieldPowerRemaining - shieldSeconds);
+                if (shieldPowerRemaining < .00001f) shieldPowerRemaining = 0;
+                if (shieldPowerRemaining <= 0) ShieldActive = true;
+            }
             RefreshShield();
         }
 
         private void CompleteCast()
         {
-            if (enemy.Color == EnemyColor.Green)
+            if (enemy.Color == EnemyColor.Green && GreenDashes)
             {
                 burstRemaining = .18f;
                 var movement = grid.GetComponent<EnemyGridMovement>();
@@ -132,13 +231,54 @@ namespace CandyCruisers
             {
                 grid.GetComponent<EnemyRowSpawner>()?.TrySummon(enemy);
             }
+            else if (enemy.Color == EnemyColor.Orange) grid.TryOrangeSwap(enemy.Id);
+        }
+
+        public bool BeginImitation(GridEnemy target)
+        {
+            if (Suspended || !isActiveAndEnabled || enemy == null || enemy.Color != EnemyColor.Yellow ||
+                target == null || target.Color == EnemyColor.Yellow || IsTransforming || IsDisguised ||
+                grid.View(target.Id) != target ||
+                Mathf.Abs(enemy.Column - target.Column) + Mathf.Abs(enemy.Row - target.Row) != 1) return false;
+            if (!enemy.IsSpecial && target.Color == EnemyColor.Orange) return false;
+            if (!enemy.IsSpecial && !grid.Model.BeginImitation(enemy.Id, target.Id)) return false;
+            undisguisedSprite = body.sprite;
+            undisguisedScale = enemy.Visuals.Root.localScale;
+            if (enemy.IsSpecial)
+            {
+                disguiseColor = target.Color;
+                enemy.Visuals.CopyVisualScale(target.Visuals);
+            }
+            imitationRemaining = ImitationSeconds;
+            presentation.BeginImitation(target, body.sprite, !enemy.IsSpecial);
+            presentation.Tick(0, enemy.Color, 0);
+            return true;
+        }
+
+        public bool RevealDisguise(EnemyColor shotColor)
+        {
+            if (!IsDisguised || shotColor == EnemyColor.Yellow) return false;
+            ResetAbility();
+            presentation.RevealDisguise();
+            presentation.Tick(0, EnemyColor.Yellow, 0);
+            return true;
+        }
+
+        private void RestoreDisguise()
+        {
+            if (!IsDisguised) return;
+            disguiseColor = null;
+            if (body != null) body.sprite = undisguisedSprite;
+            enemy.Visuals.Root.localScale = undisguisedScale;
         }
 
         public bool Absorb(EnemyColor shotColor)
         {
             if (enemy == null || enemy.Color != EnemyColor.Blue || !ShieldActive || shotColor == EnemyColor.Blue) return false;
+            if (enemy.IsSpecial) return true;
             ShieldActive = false;
-            cooldown = NextCooldown();
+            shieldSpent = true;
+            shieldPowerRemaining = 0;
             RefreshVisuals();
             return true;
         }
@@ -150,15 +290,24 @@ namespace CandyCruisers
         }
         private void RefreshShield()
         {
-            shield.enabled = ShieldActive && enemy.Color == EnemyColor.Blue;
-            shield.color = new Color(.3f, .85f, 1f, .9f * presentation.SpawnOpacity);
+            shield.enabled = !groupShielded && enemy.Color == EnemyColor.Blue && !awaitingSpawnShield && (ShieldActive || shieldPowerRemaining > 0);
+            float progress = ShieldActive ? 1 : 1 - shieldPowerRemaining / ShieldPowerSeconds;
+            float growth = Mathf.SmoothStep(0, 1, progress);
+            shield.transform.localScale = shieldFullScale * Mathf.Max(.001f, growth);
+            shield.transform.localPosition = Vector3.down * body.sprite.bounds.extents.y * 1.1f * (1 - growth);
+            shield.color = new Color(.82f, 1f, 1f, Mathf.Lerp(.65f, 1, growth));
         }
         private void OnDisable()
         {
+            RestoreDisguise();
+            if (grid != null && enemy != null) grid.Model.CancelImitation(enemy.Id);
             ShieldActive = false;
+            awaitingSpawnShield = false;
+            shieldPowerRemaining = 0;
             if (shield != null) shield.enabled = false;
             if (body != null && enemy != null) body.color = EnemyPalette.Get(enemy.Color);
             castRemaining = burstRemaining = 0;
+            imitationRemaining = 0;
             if (presentation != null) presentation.Clear();
         }
     }

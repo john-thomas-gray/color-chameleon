@@ -12,25 +12,32 @@ Contact uses the outer edge of the logical cell, not sprite pixels or shields.
 This keeps movement stable when art changes or shield/animation visuals grow.
 The current scene uses an unrotated grid with positive horizontal scale.
 
+Horizontal speed is now proportional to the live Green count: 0.03 world units
+per second per Green, multiplied by level scaling. Zero Greens means no motion.
+The numerical timing examples below assume one Green at level-one speed.
+`UseGreenDashes` retains the previous nonzero-base-speed mode, disabled by default.
+
 ## Geometry
 
 The playfield edges are x = -3 and x = +3, shared with player wrapping and the
-visible border. Five columns are spaced 0.75 world units apart. Their local
-centers are:
+visible border. Six logical columns are spaced 0.75 world units apart. Their
+local centers are:
 
-    localCenter(column) = (column - 2) * 0.75
+    localCenter(column) = (column - 2.5) * 0.75
     occupiedLeft  = gridX + localCenter(firstOccupied) - 0.375
     occupiedRight = gridX + localCenter(lastOccupied)  + 0.375
 
 The implementation converts cell edges through the grid transform, rather than
-assuming its origin remains fixed. At unit scale, a complete row occupies 3.75
-units and reaches an edge when gridX is +1.125 or -1.125. At speed 0.3 units per
-second, that means 3.75 seconds to the first right contact from center and 7.5
-seconds between opposite contacts if both outer columns remain occupied.
+assuming its origin remains fixed. At unit scale, a level 1-6 row occupies
+columns 0-4, spans 3.75 units, and reaches the right edge when gridX is +1.5.
+At speed 0.03 units per second, that means 50 seconds to the first right contact
+from center and 75 seconds between opposite contacts if both outer columns remain
+occupied. A level 7+ row occupies columns 0-5, spans 4.5 units, and reaches the
+right edge when gridX is +0.75.
 
 If column 4 is empty, the rightmost possible occupied column becomes 3. It must
 travel another 0.75 units before touching the right border. At the default
-speed, this adds 2.5 seconds. Clearing the last enemy in column 3 adds another
+speed, this adds 25 seconds. Clearing the last enemy in column 3 adds another
 column's worth of travel. These are geometric consequences, not timers.
 
 ## Movement update
@@ -40,13 +47,14 @@ occupied columns. `EnemyGrid.OccupiedHorizontalBounds` converts their outer
 edges into world coordinates. Neither operation caches occupancy, so removals
 are reflected on the next movement update.
 
-`EnemyGridMovement.Tick` spends a frame's travel distance, speed multiplied by
-elapsed time, against the distance to the relevant border:
+`EnemyGridMovement.Tick` spends frame time up to each border contact and
+recomputes speed after the spawn callback changes the Green count.
+`AdvanceDistance` handles each segment against the distance to the relevant border:
 
 1. If the grid is empty, do not move, turn, or request descent.
 2. If the frame cannot reach the border, move normally in the current direction.
 3. Otherwise, move exactly to contact, reverse direction, and emit `SweepEnded`.
-4. The existing spawner handles descent, new rows, or bottom-boundary game over.
+4. The spawner handles descent and new rows, stopping descent at occupied capacity.
 5. Recompute bounds and spend any leftover travel against the new state.
 
 Recomputing after the callback matters: spawning can expand the occupied range
@@ -71,21 +79,33 @@ and opposite amounts. `GridModel.TryShiftColumns` validates every destination
 before rebuilding its cell lookup. All surviving enemies receive the same
 column shift, so their adjacency, identity, color, and relative shape survive.
 
-Example: only columns 0-3 remain occupied when the fleet reaches the right wall.
-The grid origin is x = 1.875. Before spawning:
+Example: only columns 0-3 remain occupied when a five-wide row reaches the
+right wall. The grid origin is x = 2.25. Before spawning:
 
 - Shift all survivor column indices right by one.
-- Move the grid origin left by 0.75 to x = 1.125.
+- Move the grid origin left by 0.75 to x = 1.5.
 - Rebuild each survivor's local position from its new column.
 
-A survivor formerly in column 3 was at 1.875 + 0.75 = 2.625. After relabeling it
-is in column 4 at 1.125 + 1.5 = 2.625. Its horizontal screen position is unchanged.
-It then descends one row normally. The new row fills columns 0-4 entirely inside
-the border. Left-edge contacts use the mirrored operation.
+A survivor formerly in column 3 was at 2.25 + 0.375 = 2.625. After relabeling it
+is in column 4 at 1.5 + 1.125 = 2.625. Its horizontal screen position is unchanged.
+It then descends one row normally. The level 1-6 row fills columns 0-4 entirely
+inside the border; level 7+ rows fill columns 0-5. Left-edge contacts use the
+mirrored operation.
 
-The spawner checks the bottom boundary before relabeling or descending, so game
-over does not mutate the formation. Batch refill still restores the original
-grid position and starts moving right.
+The spawner checks the bottom boundary before relabeling or descending, so an
+occupied bottom row blocks additional descent and rows without ending the run.
+Horizontal sweeping continues. The grid has eleven rows: the final row is at
+player height, while the original ten retain their positions. Only body contact
+between a live player and an enemy in that final row triggers game over.
+
+Horizontal fleet movement and player movement test the whole traveled segment
+against stable body bounds, stopping at the earliest contact. Wrapping is split
+into movement to the edge and movement from the opposite edge, not a sweep
+through the field. Arrival by descent or Purple summon also checks contact.
+Shields, tongues and detached death effects are not enemy bodies. Pause defers
+contact checks; the absent player during recovery cannot collide, but missile
+invulnerability after reappearing does not prevent game over from body contact.
+Batch refill still restores the original grid position and starts moving right.
 
 ## Verification
 

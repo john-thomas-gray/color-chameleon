@@ -3,12 +3,12 @@ using System.Collections.Generic;
 
 namespace CandyCruisers
 {
-    public enum EnemyColor { Red, Blue, Green, Purple, Yellow }
+    public enum EnemyColor { Red, Blue, Green, Purple, Yellow, Orange }
 
     public sealed class GridModel
     {
-        public const int Columns = 5;
-        public const int Rows = 10;
+        public const int Columns = 6;
+        public const int Rows = 11;
         public sealed class Occupant
         {
             public int Id { get; }
@@ -21,6 +21,7 @@ namespace CandyCruisers
 
         private readonly Occupant[,] cells = new Occupant[Columns, Rows];
         private readonly Dictionary<int, Occupant> enemies = new Dictionary<int, Occupant>();
+        private readonly Dictionary<int, int> imitationLinks = new Dictionary<int, int>();
         public int Count => enemies.Count;
         public static bool InBounds(int column, int row) => column >= 0 && column < Columns && row >= 0 && row < Rows;
         public Occupant At(int column, int row) => InBounds(column, row) ? cells[column, row] : null;
@@ -53,6 +54,7 @@ namespace CandyCruisers
         public bool TryAdd(int id, EnemyColor color, int column, int row)
         {
             if (!InBounds(column, row) || cells[column, row] != null || enemies.ContainsKey(id) || !Enum.IsDefined(typeof(EnemyColor), color)) return false;
+            if (color == EnemyColor.Orange && HasOrangeNeighbor(column, row)) return false;
             var enemy = new Occupant(id, color, column, row);
             enemies.Add(id, enemy);
             cells[column, row] = enemy;
@@ -64,6 +66,7 @@ namespace CandyCruisers
             if (!enemies.TryGetValue(id, out var enemy) || !InBounds(column, row)) return false;
             if (cells[column, row] == enemy) return true;
             if (cells[column, row] != null) return false;
+            if (enemy.Color == EnemyColor.Orange && HasOrangeNeighbor(column, row, id)) return false;
             cells[enemy.Column, enemy.Row] = null;
             cells[column, row] = enemy;
             enemy.Column = column;
@@ -74,8 +77,69 @@ namespace CandyCruisers
         public bool Remove(int id)
         {
             if (!enemies.TryGetValue(id, out var enemy)) return false;
+            RemoveImitationLinks(id);
             cells[enemy.Column, enemy.Row] = null;
             return enemies.Remove(id);
+        }
+
+        public bool HasOrangeNeighbor(int column, int row, int ignoredId = 0)
+        {
+            foreach (var neighbor in Neighbors(column, row))
+                if (neighbor.Color == EnemyColor.Orange && neighbor.Id != ignoredId) return true;
+            return false;
+        }
+
+        public List<Occupant> OrangeSwapTargets(int id)
+        {
+            var result = new List<Occupant>();
+            if (!enemies.TryGetValue(id, out var orange) || orange.Color != EnemyColor.Orange) return result;
+            foreach (var candidate in enemies.Values)
+            {
+                if (candidate.Color == EnemyColor.Orange || MatchingDepths(candidate.Id, candidate.Color).Count != 1 ||
+                    HasOrangeNeighbor(candidate.Column, candidate.Row, id)) continue;
+                foreach (var neighbor in Neighbors(orange.Column, orange.Row))
+                    if (neighbor.Id != candidate.Id && neighbor.Color == candidate.Color)
+                    { result.Add(candidate); break; }
+            }
+            return result;
+        }
+
+        public bool TryOrangeSwap(int id, int targetId)
+        {
+            var targets = OrangeSwapTargets(id);
+            var target = targets.Find(candidate => candidate.Id == targetId);
+            if (target == null) return false;
+            var orange = enemies[id];
+            int column = orange.Column, row = orange.Row;
+            cells[column, row] = target;
+            cells[target.Column, target.Row] = orange;
+            orange.Column = target.Column; orange.Row = target.Row;
+            target.Column = column; target.Row = row;
+            return true;
+        }
+
+        public bool BeginImitation(int id, int targetId)
+        {
+            if (!enemies.TryGetValue(id, out var enemy) || !enemies.TryGetValue(targetId, out var target) ||
+                enemy.Color != EnemyColor.Yellow || target.Color == EnemyColor.Yellow || target.Color == EnemyColor.Orange || imitationLinks.ContainsKey(id) ||
+                Math.Abs(enemy.Column - target.Column) + Math.Abs(enemy.Row - target.Row) != 1) return false;
+            imitationLinks.Add(id, targetId);
+            return true;
+        }
+
+        public bool TryGetImitationTarget(int id, out Occupant target)
+        {
+            target = null;
+            return imitationLinks.TryGetValue(id, out int targetId) && enemies.TryGetValue(targetId, out target);
+        }
+
+        public void CancelImitation(int id) => imitationLinks.Remove(id);
+
+        private void RemoveImitationLinks(int id)
+        {
+            imitationLinks.Remove(id);
+            foreach (var source in new List<int>(imitationLinks.Keys))
+                if (imitationLinks[source] == id) imitationLinks.Remove(source);
         }
 
         public bool CanDescend
@@ -134,28 +198,63 @@ namespace CandyCruisers
             return true;
         }
 
-        public List<int> ClearMatchingChain(int id, EnemyColor shotColor)
+        public Dictionary<int, int> MatchingDepths(int id, EnemyColor shotColor)
         {
-            var cleared = new List<int>();
-            if (!enemies.TryGetValue(id, out var first) || first.Color != shotColor) return cleared;
-            var visited = new HashSet<int> { id };
+            var depths = new Dictionary<int, int>();
+            if (!enemies.TryGetValue(id, out var first) || first.Color != shotColor) return depths;
+            depths.Add(id, 1);
             var pending = new Queue<Occupant>();
             pending.Enqueue(first);
+            void Visit(Occupant next, int depth)
+            {
+                if (depths.ContainsKey(next.Id)) return;
+                depths.Add(next.Id, depth);
+                pending.Enqueue(next);
+            }
             while (pending.Count > 0)
             {
                 var enemy = pending.Dequeue();
-                cleared.Add(enemy.Id);
+                int nextDepth = depths[enemy.Id] + 1;
                 foreach (var neighbor in Neighbors(enemy.Column, enemy.Row))
-                    if (neighbor.Color == shotColor && visited.Add(neighbor.Id)) pending.Enqueue(neighbor);
+                    if (neighbor.Color == enemy.Color) Visit(neighbor, nextDepth);
+                // Active tendrils connect both color groups before any removals occur.
+                if (TryGetImitationTarget(enemy.Id, out var target)) Visit(target, nextDepth);
+                foreach (var link in imitationLinks)
+                    if (link.Value == enemy.Id) Visit(enemies[link.Key], nextDepth);
             }
+            return depths;
+        }
+
+        public List<int> ClearMatchingChain(int id, EnemyColor shotColor)
+        {
+            var cleared = new List<int>(MatchingDepths(id, shotColor).Keys);
             // Discover the whole group before removal changes its connectivity.
             foreach (int clearedId in cleared) Remove(clearedId);
             return cleared;
         }
 
+        public List<Occupant> ColorGroup(int id)
+        {
+            var result = new List<Occupant>();
+            if (!enemies.TryGetValue(id, out var first)) return result;
+            var seen = new HashSet<int> { id };
+            var pending = new Queue<Occupant>();
+            pending.Enqueue(first);
+            while (pending.Count > 0)
+            {
+                var enemy = pending.Dequeue();
+                result.Add(enemy);
+                foreach (var neighbor in Neighbors(enemy.Column, enemy.Row))
+                    if (neighbor.Color == first.Color && seen.Add(neighbor.Id)) pending.Enqueue(neighbor);
+            }
+            return result;
+        }
+
         public bool SetColor(int id, EnemyColor color)
         {
             if (!enemies.TryGetValue(id, out var enemy) || !Enum.IsDefined(typeof(EnemyColor), color)) return false;
+            if (color == EnemyColor.Orange && HasOrangeNeighbor(enemy.Column, enemy.Row, id)) return false;
+            if (enemy.Color != color) RemoveImitationLinks(id);
             enemy.Color = color;
             return true;
         }
@@ -172,6 +271,15 @@ namespace CandyCruisers
             var result = new List<EnemyColor>();
             foreach (EnemyColor color in Enum.GetValues(typeof(EnemyColor)))
                 if (ColorCount(color) > 0) result.Add(color);
+            return result;
+        }
+
+        public List<EnemyColor> SelectablePlayerColors()
+        {
+            var result = AvailableColors();
+            foreach (var enemy in enemies.Values)
+                if (enemy.Color == EnemyColor.Yellow && !imitationLinks.ContainsKey(enemy.Id)) return result;
+            result.Remove(EnemyColor.Yellow);
             return result;
         }
 

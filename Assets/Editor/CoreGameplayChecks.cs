@@ -12,7 +12,7 @@ namespace CandyCruisers.Editor
             Check(model.TryAdd(1, EnemyColor.Blue, 0, 0), "Add corner enemy");
             Check(!model.TryAdd(1, EnemyColor.Red, 1, 0), "Reject duplicate identity");
             Check(!model.TryAdd(2, EnemyColor.Red, 0, 0), "Reject occupied cell");
-            Check(!model.TryAdd(2, EnemyColor.Red, GridModel.Columns, 0) && !model.TryAdd(2, EnemyColor.Red, 0, 10), "Reject out of bounds");
+            Check(!model.TryAdd(2, EnemyColor.Red, GridModel.Columns, 0) && !model.TryAdd(2, EnemyColor.Red, 0, GridModel.Rows), "Reject out of bounds");
             Check(model.TryAdd(2, EnemyColor.Red, 1, 0) && model.TryAdd(3, EnemyColor.Blue, 0, 1), "Add neighbors");
             Check(model.TryAdd(4, EnemyColor.Red, 1, 1), "Add diagonal");
             Check(model.Neighbors(0, 0).Select(e => e.Id).OrderBy(id => id).SequenceEqual(new[] { 2, 3 }), "Orthogonal neighbors only");
@@ -24,7 +24,7 @@ namespace CandyCruisers.Editor
             Check(model.AvailableColors().SequenceEqual(new[] { EnemyColor.Red }), "Removed colors excluded");
             Check(model.Count == 3, "Total occupancy");
             var full = new GridModel();
-            for (int row = 0; row < 10; row++)
+            for (int row = 0; row < GridModel.Rows; row++)
             for (int col = 0; col < GridModel.Columns; col++) Check(full.TryAdd(row * GridModel.Columns + col, EnemyColor.Blue, col, row), "Fill every cell");
             Check(full.Count == GridModel.Columns * GridModel.Rows && full.Neighbors(3, 5).Count() == 4, "Full grid and interior neighbors");
             Check(Mathf.Abs(PlayerMovement.Wrap(3.2f) + 2.8f) < 0.0001f, "Right wrap");
@@ -36,9 +36,9 @@ namespace CandyCruisers.Editor
 
             var grid = GameObject.Find("Enemy Grid").GetComponent<EnemyGrid>();
             grid.RegisterChildren();
-            Check(grid.Model.Count == 2 * GridModel.Columns && grid.Model.ColorCount(EnemyColor.Red) == GridModel.Columns && grid.Model.ColorCount(EnemyColor.Blue) == GridModel.Columns, "Scene registration");
+            Check(grid.Model.Count == 2 * RunProgress.StandardRowWidth && grid.Model.ColorCount(EnemyColor.Red) == RunProgress.StandardRowWidth && grid.Model.ColorCount(EnemyColor.Blue) == RunProgress.StandardRowWidth, "Scene registration");
             grid.RegisterChildren();
-            Check(grid.Model.Count == 2 * GridModel.Columns, "Repeat registration does not double-count");
+            Check(grid.Model.Count == 2 * RunProgress.StandardRowWidth, "Repeat registration does not double-count");
             var player = GameObject.Find("Player").GetComponent<PlayerMovement>();
             var tongue = player.GetComponentInChildren<TongueShot>();
             player.RefreshColor();

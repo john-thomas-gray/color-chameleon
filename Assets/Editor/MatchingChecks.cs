@@ -78,7 +78,7 @@ namespace CandyCruisers.Editor
             var obj = new GameObject("Fixture enemy", typeof(SpriteRenderer), typeof(GridEnemy));
             obj.transform.SetParent(grid.transform, false);
             obj.transform.localScale = Vector3.one * 0.5f;
-            obj.GetComponent<SpriteRenderer>().sprite = sprite;
+            obj.GetComponentInChildren<SpriteRenderer>().sprite = sprite;
             var enemy = obj.GetComponent<GridEnemy>();
             enemy.Configure(color, column, row);
             Check(grid.Register(enemy), "Fixture registration");

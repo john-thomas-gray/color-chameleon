@@ -17,14 +17,25 @@ namespace CandyCruisers.Editor
             progress.RegisterClear(90, false);
             Check(progress.Level == 4 && progress.Defeated == 108, "Multiple thresholds in one clear");
             progress.RegisterClear(162, false);
-            Check(progress.Level == 6 && progress.BatchRows == 5, "Yellow level at 270");
+            Check(progress.Level == 6 && progress.BatchRows == 5 && progress.RowWidth == RunProgress.StandardRowWidth, "Yellow level at 270");
+            var wideProgress = new RunProgress();
+            while (wideProgress.Level < RunProgress.WideRowsStartLevel)
+                wideProgress.RegisterClear(wideProgress.NextThreshold - wideProgress.Defeated, false);
+            Check(wideProgress.Level == 7 && wideProgress.BatchRows == 6 && wideProgress.RowWidth == RunProgress.WideRowWidth &&
+                wideProgress.BatchEnemies == 36, "Level seven expands refill rows to six wide");
             long before = progress.Score;
             Check(progress.RegisterClear(0, true) == 0 && progress.Score == before, "No duplicate empty-clear bonus");
             Check(progress.RegisterClear(2, true) == 60300, "Per-enemy scaling and fleet bonus");
+            var weighted = new RunProgress();
+            Check(weighted.RegisterClear(5, false, 11) == 1100 && weighted.Defeated == 5,
+                "Branch digits 1,2,2,3,3 multiply score without multiplying defeats");
+            weighted.RegisterClear(12, false);
+            Check(weighted.RegisterClear(2, true, 3) == 10300 && weighted.Level == 2 && weighted.Defeated == 19,
+                "Weighted clear uses pre-clear level and leaves fleet bonus unmultiplied");
             for (int level = 1; level <= 7; level++)
             foreach (EnemyColor color in Enum.GetValues(typeof(EnemyColor)))
                 Check(RunProgress.IsUnlocked(color, level) == (level >=
-                    (color == EnemyColor.Green ? 2 : color == EnemyColor.Purple ? 4 : color == EnemyColor.Yellow ? 6 : 1)), "Exact unlock schedule");
+                    (color == EnemyColor.Green ? 2 : color == EnemyColor.Purple ? 4 : color == EnemyColor.Yellow ? 6 : color == EnemyColor.Orange ? 9 : 1)), "Exact unlock schedule");
 
             var random = UnityEngine.Random.state;
             UnityEngine.Random.InitState(8301);
@@ -33,9 +44,10 @@ namespace CandyCruisers.Editor
             {
                 var grid = root.GetComponent<EnemyGrid>();
                 var movement = root.GetComponent<EnemyGridMovement>();
+                movement.UseGreenDashes = true;
                 var spawner = root.GetComponent<EnemyRowSpawner>();
                 spawner.Configure(Prefab(EnemyColor.Blue), Prefab(EnemyColor.Red));
-                spawner.ConfigureNewTypes(Prefab(EnemyColor.Green), Prefab(EnemyColor.Purple), Prefab(EnemyColor.Yellow));
+                spawner.ConfigureNewTypes(Prefab(EnemyColor.Green), Prefab(EnemyColor.Purple), Prefab(EnemyColor.Yellow), Prefab(EnemyColor.Orange));
                 grid.ConfigureAbilities(AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Red Missile.prefab"),
                     AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Art/ShieldArc.png"));
                 var session = root.AddComponent<GameSession>();
@@ -68,9 +80,10 @@ namespace CandyCruisers.Editor
                 movement.ResetSweep();
                 // Edit-mode fixtures do not invoke MonoBehaviour.OnEnable automatically.
                 movement.SweepEnded += () => spawner.TryAdvance();
-                movement.AdvanceDistance(1.825);
+                grid.OccupiedHorizontalBounds(out _, out float beforeDashRight);
+                movement.AdvanceDistance(PlayerMovement.HalfWidth - beforeDashRight - .05f);
                 ability.Tick(21); ability.Tick(.8f); ability.Tick(.18f);
-                Check(movement.Direction == -1 && grid.Model.Count == 2 + GridModel.Columns, "Green burst at occupied edge turns and descends exactly once: direction=" +
+                Check(movement.Direction == -1 && grid.Model.Count == 2 + RunProgress.StandardRowWidth, "Green burst at occupied edge turns and descends exactly once: direction=" +
                     movement.Direction + " count=" + grid.Model.Count + " x=" + root.transform.position.x + " casting=" + ability.IsCasting);
                 grid.OccupiedHorizontalBounds(out float left, out float right);
                 Check(left >= -3.0001f && right <= 3.0001f, "Green burst respects playfield after reindexing");
@@ -86,22 +99,28 @@ namespace CandyCruisers.Editor
                     timed.Tick(.8f);
                     timed.Tick(.18f);
                     float subsequent = UntilGreenWarning(timed) + .18f;
-                    Check(initial >= 7.9f && initial <= 20.1f && subsequent >= 7.9f && subsequent <= 20.1f,
-                        "Initial and repeated Green cooldowns stay within 8-20 seconds");
+                    Check(initial >= 5.9f && initial <= 15.1f && subsequent >= 5.9f && subsequent <= 15.1f,
+                        "Initial and repeated Green cooldowns stay within 6-15 seconds");
                     shortest = Mathf.Min(shortest, initial);
                     longest = Mathf.Max(longest, initial);
                     if (Mathf.Abs(initial - subsequent) > .5f) resampled++;
                     Empty(grid);
                 }
-                Check(longest - shortest > 8 && resampled > 12, "Greens use widely staggered, freshly sampled cooldowns");
+                Check(longest - shortest > 6 && resampled > 12, "Greens use widely staggered, freshly sampled cooldowns");
                 movement.enabled = true;
 
                 var yellow = Add(grid, EnemyColor.Yellow, 2, 0);
                 var blue = Add(grid, EnemyColor.Blue, 3, 0);
                 yellow.GetComponent<EnemyAbilities>().Tick(41);
+                Check(yellow.Color == EnemyColor.Yellow && yellow.GetComponent<EnemyAbilities>().IsTransforming,
+                    "Yellow remains matchable during transformation");
+                yellow.GetComponent<EnemyAbilities>().Tick(EnemyAbilities.ImitationSeconds);
                 Check(yellow.Color == EnemyColor.Blue && grid.Model.ColorCount(EnemyColor.Yellow) == 0 &&
                     grid.Model.ColorCount(EnemyColor.Blue) == 2, "Ordinary Yellow permanently changes model color");
-                Check(yellow.GetComponent<EnemyAbilities>().ShieldActive, "Imitation immediately acquires ordinary ability");
+                var copiedBlue = yellow.GetComponent<EnemyAbilities>();
+                Check(!copiedBlue.ShieldActive && copiedBlue.CooldownRemaining > 0, "Imitation becomes an ordinary Blue with an initial cooldown");
+                copiedBlue.Tick(copiedBlue.CooldownRemaining + .35f);
+                Check(copiedBlue.ShieldActive, "Copied Blue powers up after its cooldown");
                 grid.Unregister(blue); UnityEngine.Object.DestroyImmediate(blue.gameObject);
                 yellow.GetComponent<EnemyAbilities>().Tick(1);
                 Check(yellow.Color == EnemyColor.Blue, "Neighbor death does not undo ordinary imitation");
@@ -124,7 +143,9 @@ namespace CandyCruisers.Editor
                 foreach (var enemy in root.GetComponentsInChildren<GridEnemy>())
                     Check(grid.Model.At(enemy.Column, enemy.Row).Id == enemy.Id, "Summon preserves model/view agreement");
                 Empty(grid);
-                Check(spawner.SpawnBatch(10), "Fill capacity");
+                Check(spawner.SpawnBatch(GridModel.Rows), "Fill capacity");
+                for (int row = 0; row < GridModel.Rows; row++)
+                    Add(grid, EnemyColor.Blue, GridModel.Columns - 1, row);
                 purple = root.GetComponentsInChildren<GridEnemy>()[0];
                 Check(spawner.TrySummon(purple) == null && grid.Model.Count == GridModel.Columns * GridModel.Rows, "Full fleet cannot be overwritten");
                 Empty(grid);
@@ -138,7 +159,7 @@ namespace CandyCruisers.Editor
                 }
                 Empty(grid);
                 int events = 0, removed = 0;
-                grid.MatchCleared += (n, complete) => { events++; removed += n; };
+                grid.MatchCleared += (n, complete, weight) => { events++; removed += n; };
                 var red = Add(grid, EnemyColor.Red, 2, 0);
                 int id = red.Id;
                 grid.ClearMatchingChain(id, EnemyColor.Blue);
@@ -146,6 +167,16 @@ namespace CandyCruisers.Editor
                 grid.ClearMatchingChain(id, EnemyColor.Red);
                 grid.ClearMatchingChain(id, EnemyColor.Red);
                 Check(events == 1 && removed == 1, "Scoring event exactly once per real removal");
+                red = Add(grid, EnemyColor.Red, 2, 1);
+                Add(grid, EnemyColor.Red, 1, 1);
+                Add(grid, EnemyColor.Red, 3, 1);
+                Add(grid, EnemyColor.Red, 1, 0);
+                Add(grid, EnemyColor.Red, 3, 0);
+                int emittedWeight = 0;
+                grid.MatchCleared += (n, complete, weight) => emittedWeight = weight;
+                grid.ClearMatchingChain(red.Id, EnemyColor.Red);
+                Check(emittedWeight == 11 && removed == 6 && events == 2,
+                    "Real branching clear emits the sum of displayed death digits once");
             }
             finally
             {

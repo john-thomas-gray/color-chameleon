@@ -22,7 +22,8 @@ namespace CandyCruisers.Editor
             spawner.Configure(AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Blue Enemy.prefab"),
                 AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Red Enemy.prefab"));
             spawner.ConfigureNewTypes(CreateType(EnemyColor.Green, "watermelon"),
-                CreateType(EnemyColor.Purple, "Plum"), CreateType(EnemyColor.Yellow, "Lemon"));
+                CreateType(EnemyColor.Purple, "Plum"), CreateType(EnemyColor.Yellow, "Lemon"),
+                AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Orange Enemy.prefab"));
             grid.ConfigureAbilities(CreateMissile(), CreateShieldSprite());
             var session = root.GetComponent<GameSession>();
             if (session == null) session = root.AddComponent<GameSession>();
@@ -75,6 +76,9 @@ namespace CandyCruisers.Editor
             border.startColor = border.endColor = new Color(0.65f, 0.78f, 0.84f, 0.45f);
             border.sortingOrder = -50;
             border.numCornerVertices = 2;
+            var frame = border.GetComponent<PlayfieldFrame>();
+            if (frame == null) frame = border.gameObject.AddComponent<PlayfieldFrame>();
+            frame.Configure(GameObject.Find("Player").GetComponent<PlayerMovement>());
         }
 
         private static GameObject CreateMissile()
@@ -93,17 +97,21 @@ namespace CandyCruisers.Editor
             return prefab;
         }
 
+        public static void RebuildShieldSprite() => CreateShieldSprite();
+
         private static Sprite CreateShieldSprite()
         {
             const string path = "Assets/Art/ShieldArc.png";
             var texture = new Texture2D(128, 128, TextureFormat.RGBA32, false);
+            // At the original 1.25 body-diameter scale, the outer endpoint chord is one body diameter.
+            float halfChord = 128f / 1.25f / 2;
+            float endAngleCos = Mathf.Sqrt(1 - Mathf.Pow(halfChord / 63f, 2));
             for (int y = 0; y < 128; y++)
             for (int x = 0; x < 128; x++)
             {
                 float radius = Vector2.Distance(new Vector2(x + 0.5f, y + 0.5f), new Vector2(64, 64));
                 float ring = Mathf.Clamp01(63 - radius) * Mathf.Clamp01(radius - 58);
-                // A broad lower arc faces the player while leaving the enemy visible.
-                float arc = Mathf.Clamp01((64 - (y + .5f)) - radius * .2f);
+                float arc = Mathf.Clamp01((64 - (y + .5f)) - radius * endAngleCos);
                 texture.SetPixel(x, y, new Color(1, 1, 1, ring * arc));
             }
             texture.Apply();

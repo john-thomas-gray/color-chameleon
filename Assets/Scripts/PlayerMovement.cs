@@ -4,6 +4,7 @@ namespace CandyCruisers
 {
     public sealed class PlayerMovement : MonoBehaviour
     {
+        public const int MaxLives = 3;
         public const float HalfWidth = 3f;
         [SerializeField, Min(0.1f)] private float speed = 5f;
         [SerializeField, Min(0.1f)] private float touchSpeed = 12f;
@@ -17,10 +18,12 @@ namespace CandyCruisers
         private float pointerTravel;
         private float targetX;
         private bool movingToTarget;
+        public int Lives { get; private set; } = MaxLives;
         public EnemyColor? ReadyColor { get; private set; }
         public int MagicCharges { get; private set; }
         private EnemyColor? nextWaveColor;
         public bool ShotActive => tongue != null && tongue.Active;
+        public bool Stunned { get; private set; }
         public void PrepareNextWave(EnemyColor[] plan)
         {
             if (plan == null || plan.Length == 0) return;
@@ -35,35 +38,91 @@ namespace CandyCruisers
         public void RefreshPresentation(float time)
         {
             if (body == null) return;
+            if (Stunned) { body.color = Color.gray; return; }
             bool magic = MagicCharges > 0 || tongue != null && tongue.Active && tongue.IsMagic;
-            body.color = magic ? EnemyPalette.Get((EnemyColor)(Mathf.FloorToInt(time * 5) % 5)) :
+            body.color = magic ? EnemyPalette.Get((EnemyColor)(Mathf.FloorToInt(time * 10) % 6)) :
                 tongue != null && tongue.Active ? EnemyPalette.Get(tongue.ShotColor) :
                 ReadyColor.HasValue ? EnemyPalette.Get(ReadyColor.Value) : Color.gray;
         }
         private EnemyGrid subscribedGrid;
+        private TongueShot subscribedTongue;
+        private bool shotClearedColor;
+        private bool shotHitEnemy;
+        public event System.Action ShotAccepted;
+        public event System.Action<bool> ShotCompleted;
+        public event System.Action PlayerHit;
+        public event System.Action FatalHit;
         private void OnEnable() => SubscribeToGrid();
-        private void OnDisable() => UnsubscribeFromGrid();
-        private void OnDestroy() => UnsubscribeFromGrid();
+        private void OnDisable() { UnsubscribeFromGrid(); ClearRecoveryCue(); }
+        private void OnDestroy() { UnsubscribeFromGrid(); ClearRecoveryCue(); }
         private void SubscribeToGrid()
         {
-            if (grid == subscribedGrid) return;
+            if (grid == subscribedGrid && tongue == subscribedTongue) return;
             UnsubscribeFromGrid();
+            subscribedTongue = tongue;
+            if (subscribedTongue != null) subscribedTongue.Finished += OnShotFinished;
+            if (subscribedTongue != null) subscribedTongue.Deflected += OnDeflected;
             subscribedGrid = grid;
             if (subscribedGrid == null) return;
             subscribedGrid.ColorCleared += AwardMagic;
+            subscribedGrid.MatchCleared += OnMatchCleared;
+            subscribedGrid.LastYellowTransformed += OnLastYellowTransformed;
             subscribedGrid.FleetCleared += ResetMagic;
         }
         private void UnsubscribeFromGrid()
         {
+            if (subscribedTongue != null) subscribedTongue.Finished -= OnShotFinished;
+            if (subscribedTongue != null) subscribedTongue.Deflected -= OnDeflected;
+            subscribedTongue = null;
             if (subscribedGrid == null) return;
             subscribedGrid.ColorCleared -= AwardMagic;
+            subscribedGrid.MatchCleared -= OnMatchCleared;
+            subscribedGrid.LastYellowTransformed -= OnLastYellowTransformed;
             subscribedGrid.FleetCleared -= ResetMagic;
             subscribedGrid = null;
         }
-        private void AwardMagic(EnemyColor color) => MagicCharges = Mathf.Min(2, MagicCharges + 1);
+        private void AwardMagic(EnemyColor color)
+        {
+            MagicCharges = Mathf.Min(2, MagicCharges + 1);
+            if (ShotActive) shotClearedColor = true;
+        }
+        private void OnMatchCleared(int count, bool fleetCleared, int scoreWeight)
+        {
+            if (ShotActive) shotHitEnemy = true;
+        }
+        private void OnShotFinished()
+        {
+            Stunned = false;
+            RefreshPresentation(Time.time);
+            if (!shotClearedColor && grid != null) grid.ResetColorClearStreak();
+            ShotCompleted?.Invoke(shotHitEnemy);
+            shotClearedColor = false;
+            shotHitEnemy = false;
+        }
+        private void OnDeflected()
+        {
+            Stunned = true;
+            movingToTarget = false;
+            finger = -1;
+            RefreshPresentation(Time.time);
+        }
         private void ResetMagic() => MagicCharges = 0;
+        private void OnLastYellowTransformed()
+        {
+            if (ReadyColor == EnemyColor.Yellow) Hit();
+            RefreshColor();
+        }
         private float recoveryRemaining;
+        private PresentationCue recoveryCue;
+        private void ClearRecoveryCue()
+        {
+            if (recoveryCue == null) return;
+            if (Application.isPlaying) Destroy(recoveryCue.gameObject);
+            else DestroyImmediate(recoveryCue.gameObject);
+            recoveryCue = null;
+        }
         public bool ControlsLocked { get; set; }
+        public void CancelPointer() { finger = -1; movingToTarget = false; }
         public void CancelShot() => tongue.Cancel();
         public void StopActions()
         {
@@ -71,26 +130,76 @@ namespace CandyCruisers
             movingToTarget = false;
             finger = -1;
         }
-        public bool Alive => recoveryRemaining <= 1.5f;
+        public bool FatallyDefeated { get; private set; }
+        public bool Alive => !FatallyDefeated && recoveryRemaining <= 1.5f && (recoveryCue == null || recoveryCue.Finished);
         public bool Invulnerable => recoveryRemaining > 0;
-        public Bounds HitBounds => body.bounds;
+        public Bounds HitBounds => CharacterVisuals.Ensure(gameObject).HitBounds;
 
-        public bool Hit()
+        public PresentationCue BeginFatalDefeat()
         {
-            if (ControlsLocked || Invulnerable) return false;
-            recoveryRemaining = 3f;
-            ResetMagic();
-            tongue.Cancel();
+            if (FatallyDefeated) return null;
+            FatallyDefeated = true;
+            ControlsLocked = true;
+            ClearRecoveryCue();
+            var cue = CharacterVisuals.Ensure(gameObject).PlayerDefeat(ReadyColor ?? EnemyColor.Blue);
+            StopActions();
+            ShowPlayer(false);
+            return cue;
+        }
+
+        public void ResetForRun()
+        {
+            Lives = MaxLives;
+            FatallyDefeated = false;
+            recoveryRemaining = 0;
+            Stunned = false;
             movingToTarget = false;
             finger = -1;
+            ReadyColor = null;
+            nextWaveColor = null;
+            ClearRecoveryCue();
+            ResetMagic();
+            if (tongue != null) tongue.Cancel();
+            ShowPlayer(true);
+            RefreshColor(true);
+        }
+
+        public bool GrantLife()
+        {
+            if (Lives >= MaxLives || FatallyDefeated) return false;
+            Lives++;
+            return true;
+        }
+
+        public bool Hit(bool ignoreInvulnerability = false)
+        {
+            if (ControlsLocked || FatallyDefeated || !Alive || (!ignoreInvulnerability && Invulnerable)) return false;
+            ClearRecoveryCue();
+            Lives = Mathf.Max(0, Lives - 1);
+            ResetMagic();
+            tongue.Cancel();
+            PlayerHit?.Invoke();
+            movingToTarget = false;
+            finger = -1;
+            if (Lives == 0)
+            {
+                FatalHit?.Invoke();
+                if (!FatallyDefeated) BeginFatalDefeat();
+                return true;
+            }
+            recoveryRemaining = 3f;
+            recoveryCue = CharacterVisuals.Ensure(gameObject).PlayerDefeat(ReadyColor ?? EnemyColor.Blue);
+            if (recoveryCue != null) recoveryCue.enabled = false;
             ShowPlayer(false);
             return true;
         }
 
         public void TickSurvival(float seconds)
         {
-            if (recoveryRemaining <= 0) return;
+            if (FatallyDefeated) return;
+            if (recoveryRemaining <= 0 && (recoveryCue == null || recoveryCue.Finished)) return;
             bool wasAlive = Alive;
+            if (recoveryCue != null) recoveryCue.Tick(seconds);
             recoveryRemaining = Mathf.Max(0, recoveryRemaining - Mathf.Max(0, seconds));
             if (!wasAlive && Alive) RefreshColor(true);
             ShowPlayer(Alive && (!Invulnerable || Mathf.FloorToInt(recoveryRemaining * 8) % 2 == 0));
@@ -102,7 +211,8 @@ namespace CandyCruisers
         }
 
         public void Configure(EnemyGrid enemyGrid, TongueShot shot, SpriteRenderer bodyRenderer)
-        { grid = enemyGrid; tongue = shot; body = bodyRenderer; SubscribeToGrid(); }
+        { grid = enemyGrid; tongue = shot; body = bodyRenderer;
+            CharacterVisuals.Ensure(gameObject).Configure(bodyRenderer); SubscribeToGrid(); }
 
         private void Start()
         {
@@ -118,7 +228,13 @@ namespace CandyCruisers
             if (nextWaveColor.HasValue)
             {
                 ReadyColor = nextWaveColor.Value;
-                if (colors.Count > 0) nextWaveColor = null;
+                if (colors.Count > 0)
+                {
+                    var choices = grid.SelectablePlayerColors();
+                    if (choices.Count > 0 && !choices.Contains(ReadyColor.Value))
+                        ReadyColor = choices[Random.Range(0, choices.Count)];
+                    nextWaveColor = null;
+                }
             }
             else if (colors.Count == 0)
             {
@@ -126,18 +242,26 @@ namespace CandyCruisers
                 return;
             }
             else if (reroll || !ReadyColor.HasValue || !colors.Contains(ReadyColor.Value))
-                ReadyColor = colors[Random.Range(0, colors.Count)];
+            {
+                // Keep an existing Yellow, but never newly select an all-transforming color.
+                var choices = grid.SelectablePlayerColors();
+                if (choices.Count > 0) ReadyColor = choices[Random.Range(0, choices.Count)];
+            }
             RefreshPresentation(Time.time);
         }
 
         public bool Fire()
         {
-            if (ControlsLocked || !Alive || grid.Model.Count == 0) return false;
+            if (ControlsLocked || Stunned || !Alive || grid.Model.Count == 0) return false;
             RefreshColor();
             bool magic = MagicCharges > 0;
             if (!ReadyColor.HasValue || !tongue.TryFire(ReadyColor.Value,
                 Mathf.Max(0.1f, 5.3f - tongue.transform.position.y), magic)) return false;
+            shotClearedColor = false;
+            shotHitEnemy = false;
+            ShotAccepted?.Invoke();
             if (magic) MagicCharges--;
+            CharacterVisuals.Ensure(gameObject).Fire(ReadyColor.Value);
             return true;
         }
 
@@ -150,14 +274,39 @@ namespace CandyCruisers
 
         public void Move(float axis, float seconds)
         {
-            if (ControlsLocked || !Alive) return;
-            var position = transform.position;
-            position.x = Wrap(position.x + Mathf.Clamp(axis, -1, 1) * speed * seconds);
-            transform.position = position;
+            if (ControlsLocked || Stunned || !Alive) return;
+            MoveHorizontal(Mathf.Clamp(axis, -1, 1) * speed * seconds);
+        }
+
+        private void MoveHorizontal(float distance)
+        {
+            var session = grid != null ? grid.GetComponent<GameSession>() : null;
+            // Wrap is a teleport, not a sweep through the middle of the field.
+            while (Mathf.Abs(distance) > .000001f && !ControlsLocked)
+            {
+                float direction = Mathf.Sign(distance);
+                float edge = direction * HalfWidth;
+                float segment = direction * Mathf.Min(Mathf.Abs(distance), Mathf.Abs(edge - transform.position.x));
+                float fraction = session != null ? session.ContactFraction(-segment) : 1;
+                transform.position += Vector3.right * (segment * fraction);
+                if (session != null) session.FinishContactMove(fraction);
+                if (ControlsLocked) return;
+                distance -= segment;
+                if (Mathf.Abs(transform.position.x - edge) < .000001f && (direction > 0 || Mathf.Abs(distance) > .000001f))
+                {
+                    var position = transform.position;
+                    position.x = -edge;
+                    transform.position = position;
+                    if (session != null && session.CheckPlayerContact()) return;
+                }
+            }
         }
 
         public void BeginPointer(Vector2 position)
         {
+            var session = grid != null ? grid.GetComponent<GameSession>() : null;
+            if (session != null && session.PointerOverMenu(position)) { session.Pause(); CancelPointer(); return; }
+            if (Stunned) return;
             pointerStart = position;
             pointerTime = Time.unscaledTime;
             pointerTravel = 0;
@@ -165,6 +314,7 @@ namespace CandyCruisers
         }
         public void UpdatePointer(Vector2 position)
         {
+            if (Stunned || ControlsLocked) return;
             pointerTravel = Mathf.Max(pointerTravel, Vector2.Distance(position, pointerStart));
             if (view == null) view = Camera.main;
             targetX = Mathf.Clamp(view.ScreenToWorldPoint(position).x, -HalfWidth + 0.01f, HalfWidth - 0.01f);
@@ -174,6 +324,8 @@ namespace CandyCruisers
             duration <= 0.3f && travel <= screenShortSide * 0.025f;
         public void EndPointer(Vector2 position, bool canceled)
         {
+            if (ControlsLocked) { CancelPointer(); return; }
+            if (grid != null && grid.GetComponent<GameSession>()?.PointerOverMenu(position) == true) { CancelPointer(); return; }
             UpdatePointer(position);
             movingToTarget = false;
             if (!canceled && IsTap(Time.unscaledTime - pointerTime, pointerTravel, Mathf.Min(Screen.width, Screen.height))) Fire();
@@ -181,13 +333,15 @@ namespace CandyCruisers
 
         private void Update()
         {
-            if (ControlsLocked) return;
+            if (ControlsLocked || grid != null && grid.GetComponent<GameSession>()?.BlocksGameplayInput == true) return;
             TickSurvival(Time.deltaTime);
             if (!Alive) return;
+            if (grid != null && grid.GetComponent<GameSession>()?.CheckPlayerContact() == true) return;
             bool wasActive = tongue.Active;
             tongue.Tick(Time.deltaTime, grid);
             RefreshColor(wasActive && !tongue.Active);
             RefreshPresentation(Time.time);
+            if (Stunned) return;
             float axis = (Input.GetKey(KeyCode.RightArrow) || Input.GetKey(KeyCode.D) ? 1 : 0)
                 - (Input.GetKey(KeyCode.LeftArrow) || Input.GetKey(KeyCode.A) ? 1 : 0);
             if (axis != 0) { movingToTarget = false; Move(axis, Time.deltaTime); }
@@ -213,9 +367,7 @@ namespace CandyCruisers
             }
             if (movingToTarget)
             {
-                var position = transform.position;
-                position.x = MoveTowardWrapped(position.x, targetX, touchSpeed * Time.deltaTime);
-                transform.position = position;
+                MoveHorizontal(Mathf.Clamp(Wrap(targetX - transform.position.x), -touchSpeed * Time.deltaTime, touchSpeed * Time.deltaTime));
             }
             if (Input.GetKeyDown(KeyCode.Space)) Fire();
         }

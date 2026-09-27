@@ -25,14 +25,15 @@ namespace CandyCruisers.Editor
                 tongue.Cancel();
                 tongue.TryFire(EnemyColor.Red, 10, true);
                 tongue.Tick(.1f);
-                Near(tongue.Length, 2.8f, "Magic extension is twice as fast");
+                Check(line.enabled && !tongue.TryFire(EnemyColor.Blue, 10), "Magic fires immediately and blocks repeated fire");
+                Near(tongue.Length, 5.6f, "Magic extension is immediately four times normal speed");
                 Near(line.startWidth, .15f, "Magic base is twice as thick");
                 Near(line.endWidth, .22f, "Magic tip is twice as thick");
                 tongue.Cancel();
                 tongue.TryFire(EnemyColor.Red, 2, true);
-                tongue.Tick(2f / 28);
+                tongue.Tick(2f / 56);
                 tongue.Tick(.02f);
-                Near(tongue.Length, 1.2f, "Magic retracts at forty units per second");
+                Near(tongue.Length, .4f, "Magic retracts at eighty units per second");
                 tongue.Cancel();
                 tongue.TryFire(EnemyColor.Red, 2);
                 Near(line.endWidth, .11f, "Normal width restored after magic");
@@ -43,9 +44,9 @@ namespace CandyCruisers.Editor
                 spawner.Configure(AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Blue Enemy.prefab"),
                     AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Red Enemy.prefab"));
                 var player = playerObject.GetComponent<PlayerMovement>();
-                playerObject.GetComponent<SpriteRenderer>().sprite = AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Art/PlayerPlaceholder.png");
+                playerObject.GetComponentInChildren<SpriteRenderer>().sprite = AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Art/PlayerPlaceholder.png");
                 mouth.transform.SetParent(playerObject.transform, false);
-                player.Configure(grid, tongue, playerObject.GetComponent<SpriteRenderer>());
+                player.Configure(grid, tongue, playerObject.GetComponentInChildren<SpriteRenderer>());
                 var session = root.AddComponent<GameSession>();
                 session.Configure(player);
                 typeof(GameSession).GetMethod("OnEnable", System.Reflection.BindingFlags.Instance |
@@ -70,11 +71,12 @@ namespace CandyCruisers.Editor
                 Check(player.ReadyColor == EnemyColor.Blue && player.DisplayColor == EnemyPalette.Get(EnemyColor.Blue) && !player.Fire(),
                     "Return switches straight to planned color without allowing empty-field shots");
                 session.Tick(0);
-                Check(grid.Model.ColorCount(EnemyColor.Blue) == 3 * GridModel.Columns && player.ReadyColor == EnemyColor.Blue,
+                Check(grid.Model.ColorCount(EnemyColor.Blue) == session.Progress.BatchEnemies && player.ReadyColor == EnemyColor.Blue,
                     "Reserved next-wave color really spawns even if override changes during the pause");
 
                 tongue.TryFire(EnemyColor.Red, 10, true);
-                tongue.Tick(.11f, grid);
+                var bottom = grid.View(grid.Model.At(2, session.Progress.BatchRows - 1).Id).GetComponentInChildren<SpriteRenderer>().bounds.min.y;
+                tongue.Tick((bottom - tongue.transform.position.y) / 56 + .001f, grid);
                 Check(grid.Model.Count == 0 && tongue.Active && tongue.Retracting, "Last magic hit also returns visibly");
                 session.Tick(10);
                 Check(grid.Model.Count == 0, "Magic return cannot hit the next batch");

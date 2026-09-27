@@ -12,11 +12,21 @@ namespace CandyCruisers
         private float maximumLength;
         private float normalStartWidth, normalEndWidth;
         private bool widthInitialized;
+        private float deflectedRetractSpeed;
+        public bool IsDeflected => Active && deflectedRetractSpeed > 0;
+        // legacy-v1 Tongue.cs: maxSpeed 20, speedFactor = -0.25 + 0.01 * level.
+        public static float DeflectedReturnSpeed(int level) => 20f * Mathf.Max(.01f, .25f - .01f * Mathf.Max(1, level));
         public bool Active { get; private set; }
         public bool Retracting => Active && travel >= maximumLength;
         public float Length => Active ? (Retracting ? Mathf.Max(0, 2 * maximumLength - travel) : travel) : 0;
         public EnemyColor ShotColor { get; private set; }
         public bool IsMagic { get; private set; }
+        public int MagicMultiplier { get; private set; }
+        public event System.Action ExtensionStarted;
+        public event System.Action RetractionStarted;
+        public event System.Action MotionUpdated;
+        public event System.Action Finished;
+        public event System.Action Deflected;
 
         private void Awake() { line = GetComponent<LineRenderer>(); line.enabled = false; }
         public bool TryFire(EnemyColor color, float length, bool magic = false)
@@ -33,6 +43,8 @@ namespace CandyCruisers
             line.endWidth = normalEndWidth * (magic ? 2 : 1);
             ShotColor = color;
             IsMagic = magic;
+            MagicMultiplier = 0;
+            deflectedRetractSpeed = 0;
             maximumLength = length;
             travel = 0;
             Active = true;
@@ -53,14 +65,15 @@ namespace CandyCruisers
                 line.colorGradient = gradient;
             }
             Draw();
+            ExtensionStarted?.Invoke();
             return true;
         }
 
         public void Tick(float seconds, EnemyGrid grid = null)
         {
             if (!Active || seconds <= 0) return;
-            float extensionRate = extendSpeed * (IsMagic ? 2 : 1);
-            float returnRate = retractSpeed * (IsMagic ? 2 : 1);
+            bool wasRetracting = Retracting;
+            float extensionRate = extendSpeed * (IsMagic ? 4 : 1);
             if (grid != null && grid.Model.Count == 0 && !Retracting)
             {
                 maximumLength = Mathf.Max(.0001f, Length);
@@ -79,7 +92,7 @@ namespace CandyCruisers
                     while (grid.FindMatchingHit(transform.position, travel, nextLength,
                         ShotColor, .11f, out int magicId, out float magicHitLength, true))
                     {
-                        grid.ResolveTongueHit(magicId, ShotColor, true);
+                        MagicMultiplier += grid.ClearMagicChain(magicId, MagicMultiplier);
                         if (!Active) return;
                         if (grid.Model.Count == 0)
                         {
@@ -96,23 +109,45 @@ namespace CandyCruisers
                         seconds -= extending;
                     }
                 }
-                else if (grid != null && grid.FindMatchingHit(transform.position, travel, nextLength,
-                    ShotColor, 0.055f, out int id, out float hitLength))
-                {
-                    seconds -= (hitLength - travel) / extensionRate;
-                    grid.ResolveTongueHit(id, ShotColor);
-                    if (!Active) return;
-                    maximumLength = Mathf.Max(0.0001f, hitLength);
-                    travel = maximumLength;
-                }
                 else
                 {
-                    travel = nextLength;
-                    seconds -= extending;
+                    bool stopped = false;
+                    // Revealed Yellows cease matching this shot; keep sweeping the same segment.
+                    while (grid != null && grid.FindMatchingHit(transform.position, travel, nextLength,
+                        ShotColor, .055f, out int id, out float hitLength))
+                    {
+                        var result = grid.ResolveTongueHit(id, ShotColor);
+                        if (!Active) return;
+                        if (result == EnemyGrid.TongueHitResult.PassThrough) continue;
+                        seconds -= (hitLength - travel) / extensionRate;
+                        if (result == EnemyGrid.TongueHitResult.Deflected)
+                        {
+                            deflectedRetractSpeed = DeflectedReturnSpeed(grid.GetComponent<GameSession>()?.Progress.Level ?? 1);
+                            line.startColor = line.endColor = Color.gray;
+                            Deflected?.Invoke();
+                        }
+                        if (!Active) return;
+                        maximumLength = Mathf.Max(.0001f, hitLength);
+                        travel = maximumLength;
+                        stopped = true;
+                        break;
+                    }
+                    if (!stopped)
+                    {
+                        travel = nextLength;
+                        seconds -= extending;
+                    }
                 }
             }
+            if (!wasRetracting && Retracting) RetractionStarted?.Invoke();
+            if (!Active) return;
+            float returnRate = deflectedRetractSpeed > 0 ? deflectedRetractSpeed : retractSpeed * (IsMagic ? 4 : 1);
             if (seconds > 0) travel += seconds * returnRate;
-            if (travel >= 2 * maximumLength) Active = false;
+            if (travel >= 2 * maximumLength)
+            {
+                Active = false;
+                Finished?.Invoke();
+            }
             Draw();
         }
 
@@ -123,8 +158,16 @@ namespace CandyCruisers
             line.positionCount = IsMagic ? 17 : 2;
             for (int i = 0; i < line.positionCount; i++)
                 line.SetPosition(i, Vector3.up * (Length * i / (line.positionCount - 1)));
+            MotionUpdated?.Invoke();
         }
-        public void Cancel() { Active = false; if (line != null) line.enabled = false; }
+        public void Cancel()
+        {
+            bool wasActive = Active;
+            Active = false;
+            deflectedRetractSpeed = 0;
+            if (line != null) line.enabled = false;
+            if (wasActive) Finished?.Invoke();
+        }
         private void OnDisable() => Cancel();
     }
 }

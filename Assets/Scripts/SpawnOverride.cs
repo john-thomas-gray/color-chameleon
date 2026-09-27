@@ -6,7 +6,7 @@ namespace CandyCruisers
     // Editor-session storage survives Play mode domain reloads, but never enters a player build.
     public static class SpawnOverride
     {
-        public const int AllTypes = (1 << 5) - 1;
+        public const int AllTypes = (1 << 6) - 1;
         public static bool Enabled
         {
             get => SessionState.GetBool("CandyCruisers.SpawnOverride.Enabled", false);

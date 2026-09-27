@@ -18,27 +18,28 @@ namespace CandyCruisers.Editor
                 var grid = root.GetComponent<EnemyGrid>();
                 var spawner = root.GetComponent<EnemyRowSpawner>();
                 spawner.Configure(Prefab(EnemyColor.Blue), Prefab(EnemyColor.Red));
-                spawner.ConfigureNewTypes(Prefab(EnemyColor.Green), Prefab(EnemyColor.Purple), Prefab(EnemyColor.Yellow));
+                spawner.ConfigureNewTypes(Prefab(EnemyColor.Green), Prefab(EnemyColor.Purple), Prefab(EnemyColor.Yellow), Prefab(EnemyColor.Orange));
                 SpawnOverride.Enabled = true;
                 foreach (EnemyColor color in Enum.GetValues(typeof(EnemyColor)))
                 {
+                    if (color == EnemyColor.Orange) continue; // Sparse Orange-only rows are covered by OrangeChecks.
                     SpawnOverride.Types = 1 << (int)color;
-                    Check(spawner.SpawnBatch(1) && grid.Model.ColorCount(color) == GridModel.Columns, "Single-type batch bypasses level gate");
-                    Check(spawner.TryAdvance() && grid.Model.ColorCount(color) == 2 * GridModel.Columns, "Row uses override");
+                    Check(spawner.SpawnBatch(1) && grid.Model.ColorCount(color) == RunProgress.StandardRowWidth, "Single-type batch bypasses level gate");
+                    Check(spawner.TryAdvance() && grid.Model.ColorCount(color) == 2 * RunProgress.StandardRowWidth, "Row uses override");
                     var removed = grid.View(grid.Model.At(2, 0).Id);
                     grid.Unregister(removed); UnityEngine.Object.DestroyImmediate(removed.gameObject);
                     var summoned = spawner.TrySummon(grid.View(grid.Model.At(0, 0).Id));
-                    Check(summoned != null && summoned.Color == color && grid.Model.Count == 2 * GridModel.Columns, "Summon uses override");
+                    Check(summoned != null && summoned.Color == color && grid.Model.Count == 2 * RunProgress.StandardRowWidth, "Summon uses override");
                     Empty(grid);
                 }
                 SpawnOverride.Types = (1 << (int)EnemyColor.Red) | (1 << (int)EnemyColor.Yellow);
-                Check(spawner.SpawnBatch(10), "Mixed batch");
+                Check(spawner.SpawnBatch(GridModel.Rows), "Mixed batch");
                 Check(grid.Model.ColorCount(EnemyColor.Red) > 0 && grid.Model.ColorCount(EnemyColor.Yellow) > 0 &&
-                    grid.Model.ColorCount(EnemyColor.Red) + grid.Model.ColorCount(EnemyColor.Yellow) == GridModel.Columns * GridModel.Rows, "Only selected types spawn");
+                    grid.Model.ColorCount(EnemyColor.Red) + grid.Model.ColorCount(EnemyColor.Yellow) == RunProgress.StandardRowWidth * GridModel.Rows, "Only selected types spawn");
                 SpawnOverride.Enabled = false;
                 Check(grid.Model.ColorCount(EnemyColor.Yellow) > 0, "Changing override does not recolor existing enemies");
                 Empty(grid);
-                Check(spawner.SpawnBatch(3) && grid.Model.ColorCount(EnemyColor.Red) + grid.Model.ColorCount(EnemyColor.Blue) == 3 * GridModel.Columns,
+                Check(spawner.SpawnBatch(3) && grid.Model.ColorCount(EnemyColor.Red) + grid.Model.ColorCount(EnemyColor.Blue) == 3 * RunProgress.StandardRowWidth,
                     "Disabled override restores normal level-one eligibility");
                 bool rejected = false;
                 try { SpawnOverride.Types = 0; } catch (ArgumentOutOfRangeException) { rejected = true; }
