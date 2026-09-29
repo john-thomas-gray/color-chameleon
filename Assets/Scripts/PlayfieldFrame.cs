@@ -1,18 +1,35 @@
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace CandyCruisers
 {
-    [ExecuteAlways, RequireComponent(typeof(LineRenderer))]
+    [ExecuteAlways, DefaultExecutionOrder(1100), RequireComponent(typeof(LineRenderer))]
     public sealed class PlayfieldFrame : MonoBehaviour
     {
         [SerializeField] private PlayerMovement player;
         private LineRenderer boundary;
         private LineRenderer outline;
         private readonly LineRenderer[] corners = new LineRenderer[4];
+        private static readonly EnemyColor[] Colors = (EnemyColor[])System.Enum.GetValues(typeof(EnemyColor));
+        private readonly EnemyColor[] earnedColors = new EnemyColor[Colors.Length];
+        public const float SpawnPulseSeconds = .8f;
+        public const float SpawnCrunchThickness = 3f;
+        private GameSession subscribedSession;
+        private float spawnPulseRemaining;
+        private GameplayFraming crunchFraming;
+        private SpriteMask playerClip;
+        private Sprite clipSprite;
+        private SpriteRenderer[] clippedSprites;
+        private SpriteMaskInteraction[] originalMasks;
+        private SortingGroup clipGroup;
+        private bool ownsClipGroup, clipGroupWasEnabled;
+        public bool SpawnPulseActive => spawnPulseRemaining > 0;
 
         public void Configure(PlayerMovement controller)
         {
+            if (player != controller) ReleasePlayerClip();
             player = controller;
+            BindSession();
             boundary = GetComponent<LineRenderer>();
             outline = Line("Cabinet outline", .018f, true);
             float x = PlayerMovement.HalfWidth + .12f, y = 5.62f, bevel = .18f;
@@ -58,6 +75,7 @@ namespace CandyCruisers
 
         private void OnEnable()
         {
+            BindSession();
             boundary = GetComponent<LineRenderer>();
             outline = transform.Find("Cabinet outline")?.GetComponent<LineRenderer>();
             for (int i = 0; i < corners.Length; i++)
@@ -65,16 +83,181 @@ namespace CandyCruisers
             Refresh();
         }
 
-        private void LateUpdate() => Refresh();
+        private void OnDisable()
+        {
+            if (subscribedSession != null) subscribedSession.WaveSpawned -= TriggerSpawnPulse;
+            subscribedSession = null;
+            spawnPulseRemaining = 0;
+            Refresh();
+            ReleasePlayerClip(true);
+        }
+
+        private void OnDestroy() => ReleasePlayerClip();
+
+        private void BindSession()
+        {
+            var session = player != null && player.Music != null ? player.Music.GetComponent<GameSession>() : null;
+            if (session == subscribedSession) return;
+            if (subscribedSession != null) subscribedSession.WaveSpawned -= TriggerSpawnPulse;
+            subscribedSession = session;
+            if (subscribedSession != null) subscribedSession.WaveSpawned += TriggerSpawnPulse;
+        }
+
+        private void LateUpdate() { BindSession(); Tick(Time.deltaTime); }
+        public void TriggerSpawnPulse()
+        {
+            if (crunchFraming == null && Camera.main != null)
+                crunchFraming = Camera.main.GetComponent<GameplayFraming>();
+            spawnPulseRemaining = SpawnPulseSeconds;
+            Refresh();
+        }
+        public void Tick(float seconds)
+        {
+            if (subscribedSession == null || !subscribedSession.IsPaused)
+                spawnPulseRemaining = Mathf.Max(0, spawnPulseRemaining - Mathf.Max(0, seconds));
+            Refresh();
+        }
 
         public void Refresh()
         {
+            var music = player != null ? player.Music : null;
+            if (music != null && music.InGameplayRun && !player.CelebrationColor.HasValue)
+                RefreshBeat(music.BeatPosition);
+            else Refresh(Time.time);
+        }
+
+        public void RefreshBeat(float beatPosition)
+        {
+            if (boundary == null) return;
+            int phase = Mathf.FloorToInt(Mathf.Max(0, beatPosition) * 2);
+            ApplyTint(player != null && player.HasFleet && phase % 2 != 0 ? player.DisplayColor : Color.white);
+        }
+
+        public void Refresh(float time)
+        {
             if (boundary == null) return;
             var color = player != null ? player.DisplayColor : EnemyPalette.Get(EnemyColor.Blue);
-            boundary.startWidth = boundary.endWidth = .045f;
+            int count = 0;
+            if (player != null && !player.CelebrationColor.HasValue && player.MagicCharges > 0)
+                foreach (var earned in Colors)
+                    if (player.HasColorClearBar(earned)) earnedColors[count++] = earned;
+            if (count > 0)
+            {
+                float interval = Mathf.Max(.2f, .4f - .04f * (count - 1));
+                int phase = Mathf.FloorToInt(Mathf.Max(0, time) / interval) % (count * 2);
+                color = phase % 2 == 0 ? Color.white : EnemyPalette.Get(earnedColors[phase / 2]);
+            }
+            ApplyTint(color);
+        }
+
+        private void ApplyTint(Color color)
+        {
+            float pulse = SpawnPulseActive ? Mathf.Pow(Mathf.Sin(Mathf.PI *
+                Mathf.Clamp01(spawnPulseRemaining / SpawnPulseSeconds)), 2) : 0;
+            float screenScale = 1;
+            if (crunchFraming != null)
+            {
+                crunchFraming.SetWaveCrunch(pulse);
+                screenScale = crunchFraming.WaveCrunchScale;
+                if (!SpawnPulseActive) crunchFraming = null;
+            }
+            float thickness = Mathf.Lerp(1, SpawnCrunchThickness, pulse) / screenScale;
+            boundary.startWidth = boundary.endWidth = .045f * thickness;
+            if (outline != null) outline.startWidth = outline.endWidth = .018f * thickness;
             Tint(boundary, color, .85f);
             Tint(outline, color, .5f);
-            foreach (var corner in corners) Tint(corner, color, 1);
+            foreach (var corner in corners)
+            {
+                if (corner != null) corner.startWidth = corner.endWidth = .065f * thickness;
+                Tint(corner, color, 1);
+            }
+            // Do not serialize temporary mask settings into scene snapshots on entering play mode.
+            if (Application.isPlaying || playerClip != null) RefreshPlayerClip();
+        }
+
+        public void RefreshPlayerClip()
+        {
+            if (!isActiveAndEnabled || player == null || boundary.positionCount < 4) return;
+            var art = CharacterVisuals.Ensure(player.gameObject);
+            if (art.Root == null || art.Body == null) return;
+            if (playerClip == null || playerClip.transform.parent != art.Root)
+            {
+                ReleasePlayerClip(true);
+                if (clipGroup != null && clipGroup.transform != art.Root) ReleaseClipGroup();
+                if (clipGroup == null)
+                {
+                    clipGroup = art.Root.GetComponent<SortingGroup>();
+                    ownsClipGroup = clipGroup == null;
+                    if (ownsClipGroup)
+                    {
+                        clipGroup = art.Root.gameObject.AddComponent<SortingGroup>();
+                        clipGroup.hideFlags = HideFlags.DontSave;
+                        clipGroup.sortingLayerID = art.Body.sortingLayerID;
+                        clipGroup.sortingOrder = art.Body.sortingOrder;
+                    }
+                    clipGroupWasEnabled = clipGroup.enabled;
+                }
+                clipGroup.enabled = true;
+                var root = new GameObject("Player playfield clip", typeof(SpriteMask)) { hideFlags = HideFlags.DontSave };
+                root.transform.SetParent(art.Root, false);
+                playerClip = root.GetComponent<SpriteMask>();
+                var texture = Texture2D.whiteTexture;
+                clipSprite = Sprite.Create(texture, new Rect(0, 0, texture.width, texture.height), Vector2.one * .5f, 1);
+                clipSprite.hideFlags = HideFlags.DontSave;
+                playerClip.sprite = clipSprite;
+                clippedSprites = art.Root.GetComponentsInChildren<SpriteRenderer>(true);
+                originalMasks = new SpriteMaskInteraction[clippedSprites.Length];
+                for (int i = 0; i < clippedSprites.Length; i++)
+                {
+                    originalMasks[i] = clippedSprites[i].maskInteraction;
+                    clippedSprites[i].maskInteraction = SpriteMaskInteraction.VisibleInsideMask;
+                }
+                SortingGroup.UpdateAllSortingGroups();
+            }
+
+            var bounds = new Bounds(boundary.GetPosition(0), Vector3.zero);
+            for (int i = 1; i < boundary.positionCount; i++) bounds.Encapsulate(boundary.GetPosition(i));
+            Vector3 center = boundary.useWorldSpace ? bounds.center : boundary.transform.TransformPoint(bounds.center);
+            Vector3 size = boundary.useWorldSpace ? bounds.size : Vector3.Scale(bounds.size, boundary.transform.lossyScale);
+            // Stop at the rim's inner edge, including its increasing thickness during a crunch.
+            size.x = Mathf.Max(.001f, Mathf.Abs(size.x) - boundary.startWidth);
+            size.y = Mathf.Max(.001f, Mathf.Abs(size.y) - boundary.startWidth);
+            playerClip.transform.SetPositionAndRotation(center, boundary.useWorldSpace ? Quaternion.identity : boundary.transform.rotation);
+            Vector3 parentScale = art.Root.lossyScale;
+            playerClip.transform.localScale = new Vector3(size.x / (clipSprite.bounds.size.x * Mathf.Max(.0001f, Mathf.Abs(parentScale.x))),
+                size.y / (clipSprite.bounds.size.y * Mathf.Max(.0001f, Mathf.Abs(parentScale.y))), 1);
+        }
+
+        private void ReleasePlayerClip(bool keepGroup = false)
+        {
+            if (clippedSprites != null)
+                for (int i = 0; i < clippedSprites.Length; i++)
+                    if (clippedSprites[i] != null) clippedSprites[i].maskInteraction = originalMasks[i];
+            clippedSprites = null;
+            originalMasks = null;
+            if (playerClip != null)
+            {
+                playerClip.enabled = false;
+                Release(playerClip.gameObject);
+            }
+            playerClip = null;
+            if (clipSprite != null) Release(clipSprite);
+            clipSprite = null;
+            if (clipGroup != null) clipGroup.enabled = !ownsClipGroup && clipGroupWasEnabled;
+            // Keep the disabled group reusable until destruction; Unity defers Destroy until the frame ends.
+            if (!keepGroup) ReleaseClipGroup();
+        }
+
+        private void ReleaseClipGroup()
+        {
+            if (clipGroup != null && ownsClipGroup) Release(clipGroup);
+            clipGroup = null;
+        }
+
+        private static void Release(Object value)
+        {
+            if (Application.isPlaying) Destroy(value);
+            else DestroyImmediate(value);
         }
 
         private static void Tint(LineRenderer line, Color color, float alpha)

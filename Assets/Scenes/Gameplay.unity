@@ -1205,7 +1205,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b2528db9f9a854b7c8d89efed852e49d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CandyCruisers.GameSession
-  refillDelay: 1
+  refillDelay: 2
   player: {fileID: 1647030757}
 --- !u!1 &1512396677
 GameObject:

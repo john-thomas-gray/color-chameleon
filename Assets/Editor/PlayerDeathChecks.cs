@@ -9,6 +9,7 @@ namespace CandyCruisers.Editor
         public static void Run()
         {
             CheckRecoverableHits();
+            CheckFatalTiming();
             SpecialEnemyChecks.Fixture((grid, player, tongue) =>
             {
                 grid.transform.position = Vector3.up * 3;
@@ -19,17 +20,19 @@ namespace CandyCruisers.Editor
                 var enemy = ProgressionChecks.Add(grid, EnemyColor.Red, 2, GridModel.Rows - 1);
                 player.transform.position = new Vector3(enemy.transform.position.x, -4.6f, 0);
                 player.RefreshColor();
-                Check(player.Hit() && player.Lives == 2, "First hit spends a life");
+                Check(player.Hit() && player.Lives == PlayerMovement.MaxLives - 1, "First hit spends a spare life");
                 player.TickSurvival(3.1f);
-                Check(player.Hit() && player.Lives == 1, "Second hit spends a life");
+                Check(player.Hit() && player.Lives == 1, "Second hit spends the last spare, not the active life");
                 player.TickSurvival(3.1f);
                 int defeats = 0;
                 CharacterVisuals.Ensure(player.gameObject).Defeated.AddListener(() => defeats++);
                 var missile = new GameObject("Death-test missile", typeof(EnemyMissile)).GetComponent<EnemyMissile>();
                 missile.SetTarget(player);
+                player.transform.position = new Vector3(enemy.transform.position.x, -4.6f, 0);
                 Check(session.CheckPlayerContact() && session.State == GameSession.RunState.Dying, "Final contact begins death, not game-over overlay");
-                Check(defeats == 1 && player.FatallyDefeated && !player.Alive && player.ControlsLocked, "Fatal defeat fires the visual hook and locks player");
-                Check(player.GetComponentsInChildren<SpriteRenderer>().All(sprite => !sprite.enabled), "Live player art is hidden behind detached death art");
+                Check(defeats == 0 && player.FatallyDefeated && !player.Alive && player.ControlsLocked,
+                    "Fatal defeat locks the player without triggering the regular death animation");
+                Check(CharacterVisuals.Ensure(player.gameObject).Body.enabled, "Live player art remains intact during the fade");
                 Check(!grid.enabled && !grid.GetComponent<EnemyGridMovement>().enabled && !grid.GetComponent<EnemyRowSpawner>().enabled && missile.Suspended,
                     "Fleet, spawns and missiles freeze during death");
                 var position = player.transform.position;
@@ -37,7 +40,10 @@ namespace CandyCruisers.Editor
                 Check(player.transform.position == position && !player.Fire() && !player.Hit() && !player.Alive, "Fatal player cannot move, fire, take another hit or respawn");
                 session.Pause();
                 Check(!session.IsPaused, "Pause overlay cannot obscure the short death transition");
-                Check(!session.CheckPlayerContact() && defeats == 1, "Repeated contact cannot restart the death");
+                Check(!session.CheckPlayerContact() && defeats == 0, "Repeated contact cannot skip the fade or trigger a death cue");
+                session.Tick(session.GameOverBlackoutSeconds);
+                Check(defeats == 1 && player.GetComponentsInChildren<SpriteRenderer>().All(sprite => !sprite.enabled),
+                    "Only after two beats does the game-over cue replace the intact player");
                 session.Tick(.45f);
                 Check(session.State == GameSession.RunState.Dying, "Game-over overlay stays hidden mid-animation");
                 if (Application.isPlaying)
@@ -67,9 +73,11 @@ namespace CandyCruisers.Editor
                     var session = grid.gameObject.AddComponent<GameSession>(); session.Configure(player);
                     var enemy = ProgressionChecks.Add(grid, EnemyColor.Blue, 2, GridModel.Rows - 1);
                     player.transform.position = new Vector3(enemy.transform.position.x, -4.6f, 0);
-                    player.Hit(); player.TickSurvival(3.1f);
-                    player.Hit(); player.TickSurvival(3.1f);
+                    for (int i = 0; i < PlayerMovement.MaxExtraLives; i++)
+                    { player.Hit(); player.TickSurvival(4); }
+                    player.transform.position = new Vector3(enemy.transform.position.x, -4.6f, 0);
                     Check(session.CheckPlayerContact(), "Replacement death starts");
+                    session.Tick(session.GameOverBlackoutSeconds);
                     session.Tick(1);
                     Check(session.State == GameSession.RunState.Dying, "Replacement duration can outlast the placeholder");
                     session.Tick(.51f);
@@ -77,7 +85,69 @@ namespace CandyCruisers.Editor
                 }
                 finally { UnityEngine.Object.DestroyImmediate(custom.gameObject); }
             });
-            Debug.Log("Player death checks passed: animation-first contact, frozen gameplay, no respawn, exactly-once transition and replacement cues.");
+            Debug.Log("Player death checks passed: two-beat fade before fatal animation, frozen gameplay, no respawn, exactly-once transition and replacement cues.");
+        }
+
+        private static void CheckFatalTiming()
+        {
+            foreach (float step in new[] { .016f, .05f, 2f })
+            foreach (float tempo in new[] { 90f, 180f })
+                SpecialEnemyChecks.Fixture((grid, player, tongue) =>
+                {
+                    var session = grid.gameObject.AddComponent<GameSession>();
+                    session.Configure(player);
+                    if (!Application.isPlaying) typeof(GameSession).GetMethod("OnEnable",
+                        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(session, null);
+                    ProgressionChecks.Add(grid, EnemyColor.Red, 2, 0);
+                    var sounds = grid.GetComponent<SoundEffects>();
+                    var music = grid.GetComponent<GameplayMusicPlayer>();
+                    int shatters = 0;
+                    sounds.CuePlayed += (effect, pitch) => { if (effect == SoundEffect.PlayerShatter) shatters++; };
+                    Check(player.Hit(), "Recoverable hit begins without ending the run");
+                    Check(music.ShouldPlayMusic && session.GameOverBlackoutOpacity == 0 &&
+                        grid.GetComponentInChildren<GameOverBlackout>() == null && shatters == 0,
+                        "A spare-life death does not stop music, black out the scene or play the fatal shatter");
+                    player.TickSurvival(4);
+                    var settings = new UnityEditor.SerializedObject(music);
+                    settings.FindProperty("soundtrack").arraySize = 0;
+                    settings.FindProperty("beatsPerMinute").floatValue = tempo;
+                    settings.ApplyModifiedPropertiesWithoutUndo();
+                    int defeats = 0;
+                    CharacterVisuals.Ensure(player.gameObject).Defeated.AddListener(() => defeats++);
+                    typeof(GameSession).GetMethod("BeginPlayerDeath",
+                        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(session, null);
+                    float fade = 2 * 60f / tempo;
+                    Check(Mathf.Abs(session.GameOverBlackoutSeconds - fade) < .0001f,
+                        "The fade lasts exactly two beats at the fatal hit's current tempo");
+                    settings.Update();
+                    settings.FindProperty("beatsPerMinute").floatValue = tempo * 2;
+                    settings.ApplyModifiedPropertiesWithoutUndo();
+                    session.Tick(-1);
+                    session.Tick(0);
+                    Check(shatters == 0 && defeats == 0 && session.GameOverBlackoutOpacity == 0 && !music.ShouldPlayMusic,
+                        "Nonpositive death ticks neither advance the blackout nor release the shatter");
+                    float elapsed = 0;
+                    while (session.State == GameSession.RunState.Dying)
+                    {
+                        elapsed += step;
+                        session.Tick(step);
+                        Check(shatters == (elapsed >= fade + PlayerDeathBurst.ShatterSeconds ? 1 : 0),
+                            "Sound and fracture share the same timeline with short or long frames");
+                        Check(defeats == (elapsed >= fade ? 1 : 0), "Death hooks cannot run before the fade finishes");
+                        Check(elapsed < fade + PlayerDeathBurst.Duration ? session.State == GameSession.RunState.Dying :
+                            session.State == GameSession.RunState.GameOver,
+                            "Only time beyond the fade boundary advances the death animation, even on long frames");
+                        if (elapsed < fade)
+                            Check(CharacterVisuals.Ensure(player.gameObject).Body.enabled &&
+                                grid.GetComponentInChildren<FatalImpactBackdrop>() == null,
+                                "The player stays whole and the impact waits during the fade");
+                        Check(!music.Source.isPlaying && music.Source.volume == 0, "Fatal music stays stopped throughout death");
+                    }
+                    session.Tick(10);
+                    Check(shatters == 1 && defeats == 1 && session.GameOverBlackoutOpacity == 1 &&
+                        Mathf.Abs(session.GameOverBlackoutSeconds - fade) < .0001f,
+                        "Final blackout holds and the shatter never repeats after death completion");
+                });
         }
 
         private static void CheckRecoverableHits()

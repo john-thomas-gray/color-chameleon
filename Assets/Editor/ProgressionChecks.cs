@@ -17,7 +17,7 @@ namespace CandyCruisers.Editor
             progress.RegisterClear(90, false);
             Check(progress.Level == 4 && progress.Defeated == 108, "Multiple thresholds in one clear");
             progress.RegisterClear(162, false);
-            Check(progress.Level == 6 && progress.BatchRows == 5 && progress.RowWidth == RunProgress.StandardRowWidth, "Yellow level at 270");
+            Check(progress.Level == 6 && progress.BatchRows == 5 && progress.RowWidth == RunProgress.StandardRowWidth, "Purple level at 270");
             var wideProgress = new RunProgress();
             while (wideProgress.Level < RunProgress.WideRowsStartLevel)
                 wideProgress.RegisterClear(wideProgress.NextThreshold - wideProgress.Defeated, false);
@@ -35,7 +35,7 @@ namespace CandyCruisers.Editor
             for (int level = 1; level <= 7; level++)
             foreach (EnemyColor color in Enum.GetValues(typeof(EnemyColor)))
                 Check(RunProgress.IsUnlocked(color, level) == (level >=
-                    (color == EnemyColor.Green ? 2 : color == EnemyColor.Purple ? 4 : color == EnemyColor.Yellow ? 6 : color == EnemyColor.Orange ? 9 : 1)), "Exact unlock schedule");
+                    (color == EnemyColor.Green ? 2 : color == EnemyColor.Yellow ? 4 : color == EnemyColor.Purple ? 6 : color == EnemyColor.Orange ? 9 : 1)), "Exact unlock schedule");
 
             var random = UnityEngine.Random.state;
             UnityEngine.Random.InitState(8301);
@@ -58,7 +58,7 @@ namespace CandyCruisers.Editor
                     Check(spawner.SpawnBatch(10), "Spawn unlocked fleet");
                     foreach (var enemy in root.GetComponentsInChildren<GridEnemy>())
                         Check(RunProgress.IsUnlocked(enemy.Color, level), "No premature row unlock");
-                    Check(grid.Model.ColorCount((EnemyColor)(level >= 6 ? 4 : level >= 4 ? 3 : level >= 2 ? 2 : 0)) > 0,
+                    Check(grid.Model.ColorCount(level >= 6 ? EnemyColor.Purple : level >= 4 ? EnemyColor.Yellow : level >= 2 ? EnemyColor.Green : EnemyColor.Red) > 0,
                         "Newly unlocked type enters random pool");
                     Empty(grid);
                 }

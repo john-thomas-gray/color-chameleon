@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "targetLufs": -14.0,
+  "truePeakCeilingDbtp": -1,
+  "tracks": [
+    {
+      "resourceName": "AnotherJoe",
+      "sourceSha256": "4c0c879f7c86fdceb4e0287e456285eaf33f03a6eef4f8593a6f3586f1bbfabc",
+      "integratedLufs": -9.51,
+      "truePeakDbtp": 0.49,
+      "gainDb": -4.49
+    },
+    {
+      "resourceName": "DiscoDescent",
+      "sourceSha256": "73fdf7edbc60bff793924b1f8c9b7caedd704a20cb753f45e19e69929fa107be",
+      "integratedLufs": -7.41,
+      "truePeakDbtp": 0.51,
+      "gainDb": -6.59
+    },
+    {
+      "resourceName": "GameplayMusic",
+      "sourceSha256": "8f69b58593549824ce6a35c380228f339906450ce07903dc30970bdb4220f90f",
+      "integratedLufs": -7.79,
+      "truePeakDbtp": 1.31,
+      "gainDb": -6.21
+    },
+    {
+      "resourceName": "PotentialForAnything",
+      "sourceSha256": "fe6b46cda24c0ec4f9efaa0257c99ca567f4a72d8f819ad338c1875ff156f675",
+      "integratedLufs": -8.71,
+      "truePeakDbtp": 0.5,
+      "gainDb": -5.29
+    },
+    {
+      "resourceName": "We Are Not Anonymous",
+      "sourceSha256": "afd76e78e7bcd07bfa88c435533bd81d52c976b71b04fc8ce25c665e5a773537",
+      "integratedLufs": -7.73,
+      "truePeakDbtp": 2.51,
+      "gainDb": -6.27
+    }
+  ]
+}

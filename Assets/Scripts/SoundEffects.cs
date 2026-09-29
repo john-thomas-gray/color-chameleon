@@ -4,7 +4,8 @@ using UnityEngine;
 
 namespace CandyCruisers
 {
-    public enum SoundEffect { TongueWhistle = 0 }
+    public enum SoundEffect { TongueWhistle = 0, RedFire, GreenStep, GreenDash, ShieldPower,
+        YellowTransform, YellowHide, YellowReveal, PurpleWarp, EnemyDefeat, WaveSpawn, LevelUp, OneUp, ColorClear, Jackpot, BarPowerDown, BarPowerUp, GameOver, PlayerShatter, MissileFlight }
 
     [ExecuteAlways, DisallowMultipleComponent]
     public sealed class SoundEffects : MonoBehaviour
@@ -30,7 +31,38 @@ namespace CandyCruisers
             new Cue { effect = SoundEffect.TongueWhistle, volume = .65f }
         };
         private readonly List<Voice> voices = new List<Voice>();
-        private readonly Dictionary<SoundEffect, AudioClip> generatedClips = new Dictionary<SoundEffect, AudioClip>();
+        private readonly Dictionary<(SoundEffect, int, int), AudioClip> generatedClips = new Dictionary<(SoundEffect, int, int), AudioClip>();
+        public int CurrentTonic => GetComponent<GameplayMusicPlayer>()?.CurrentRelativeMajorTonic ?? 0;
+        private readonly List<AudioSource> oneShots = new List<AudioSource>();
+        private int nextVoice;
+        public event Action<SoundEffect, float> CuePlayed;
+        private static readonly int[] MajorArpeggio = { 0, 4, 7, 12, 16, 19 };
+        public static bool IsPlayableEffect(SoundEffect effect) => effect != SoundEffect.RedFire &&
+            effect != SoundEffect.GreenStep && effect != SoundEffect.GreenDash;
+        // Repeat two octaves rather than clamp later notes to a non-chord pitch.
+        public static float DefeatPitch(int multiplier) => Mathf.Pow(2, MajorArpeggio[(Mathf.Max(1, multiplier) - 1) % MajorArpeggio.Length] / 12f);
+
+        public bool PlayCue(SoundEffect effect, float pitch = 1)
+        {
+            if (!isActiveAndEnabled || Paused || !IsPlayableEffect(effect)) return false;
+            AudioSource source = oneShots.Find(voice => voice != null && !voice.isPlaying);
+            if (source == null && oneShots.Count < 24)
+            { source = CreateVoice(transform); oneShots.Add(source); }
+            if (source == null) source = oneShots[nextVoice++ % oneShots.Count];
+            if (!Play(effect, source, pitch)) return false;
+            CuePlayed?.Invoke(effect, Mathf.Clamp(pitch, .5f, 3));
+            return true;
+        }
+
+        private void OnEnable()
+        {
+            var configured = new List<Cue>(cues ?? Array.Empty<Cue>());
+            configured.RemoveAll(cue => cue == null || !IsPlayableEffect(cue.effect));
+            foreach (SoundEffect effect in Enum.GetValues(typeof(SoundEffect)))
+                if (IsPlayableEffect(effect) && !configured.Exists(cue => cue != null && cue.effect == effect))
+                    configured.Add(new Cue { effect = effect, volume = effect == SoundEffect.MissileFlight ? .55f : .7f });
+            cues = configured.ToArray();
+        }
         public bool Paused { get; private set; }
         public float Volume
         {
@@ -64,14 +96,19 @@ namespace CandyCruisers
             return source;
         }
 
-        public AudioClip GetClip(SoundEffect effect)
+        public AudioClip GetClip(SoundEffect effect) => GetClip(effect, 1);
+        private AudioClip GetClip(SoundEffect effect, float pitch)
         {
+            if (!IsPlayableEffect(effect)) return null;
             var cue = FindCue(effect);
             if (cue != null && cue.clip != null) return cue.clip;
-            if (!generatedClips.TryGetValue(effect, out var clip))
+            bool tonal = effect != SoundEffect.TongueWhistle && effect != SoundEffect.PlayerShatter;
+            int shift = tonal ? Mathf.RoundToInt(12 * Mathf.Log(Mathf.Clamp(pitch, .5f, 3), 2)) : 0;
+            var key = (effect, tonal ? CurrentTonic : 0, shift);
+            if (!generatedClips.TryGetValue(key, out var clip))
             {
-                clip = ArcadeSoundClips.Create(effect);
-                if (clip != null) generatedClips.Add(effect, clip);
+                clip = ArcadeSoundClips.Create(effect, key.Item2, shift);
+                if (clip != null) generatedClips.Add(key, clip);
             }
             return clip;
         }
@@ -80,13 +117,15 @@ namespace CandyCruisers
         {
             if (!isActiveAndEnabled || source == null) return false;
             var voice = voices.Find(item => item.source == source);
-            var clip = GetClip(effect);
+            var clip = GetClip(effect, pitch);
             if (voice == null || clip == null) return false;
             voice.volume = FindCue(effect)?.volume ?? 1;
             source.Stop();
             source.clip = clip;
             source.loop = loop;
-            source.pitch = Mathf.Clamp(pitch, .5f, 3);
+            bool generatedTonal = effect != SoundEffect.TongueWhistle && effect != SoundEffect.PlayerShatter && FindCue(effect)?.clip == null;
+            // Bake the musical shift into generated samples so pitch changes do not shorten cues or move scale notes out of key.
+            source.pitch = generatedTonal ? 1 : Mathf.Clamp(pitch, .5f, 3);
             source.volume = volume * voice.volume * voice.gain;
             source.mute = muted;
             if (Application.isPlaying)

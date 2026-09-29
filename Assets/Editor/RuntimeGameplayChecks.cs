@@ -26,6 +26,9 @@ namespace CandyCruisers.Editor
         private static float pausedTongueLength;
         private static int pausedSoundSample;
         private static float pausedSoundPitch;
+        private static bool observedGameOverFade;
+        private static bool liveShieldPrepared;
+        private static GridEnemy liveShooter;
 
         static RuntimeGameplayChecks() => EditorApplication.update += Poll;
 
@@ -58,7 +61,7 @@ namespace CandyCruisers.Editor
             Application.runInBackground = true;
             // Desktop focus can change while this unattended suite is running.
             // Explicit pause assertions below (phases 17-20) retain full control.
-            if (phase < 15)
+            if (phase < 15 || phase == 61)
             {
                 var activeSession = UnityEngine.Object.FindFirstObjectByType<GameSession>();
                 if (activeSession != null && activeSession.IsPaused) activeSession.Resume();
@@ -66,21 +69,47 @@ namespace CandyCruisers.Editor
             if (Time.timeSinceLevelLoad < 0.1f) return;
             try
             {
+                if (phase > 0 && EditorApplication.timeSinceStartup - started > 60)
+                    throw new Exception("Runtime gameplay phase " + phase + " timed out.");
                 if (phase == 0)
                 {
                     grid = GameObject.Find("Enemy Grid").GetComponent<EnemyGrid>();
                     player = GameObject.Find("Player").GetComponent<PlayerMovement>();
                     tongue = player.GetComponentInChildren<TongueShot>();
+                    var framing = Camera.main.GetComponent<GameplayFraming>();
+                    var background = GameObject.Find("Star Background")?.GetComponent<SpriteRenderer>();
+                    Require(framing != null && framing.SolidBlackBackground && Camera.main.backgroundColor == Color.black &&
+                        (background == null || !background.enabled), "Runtime gameplay background is solid black");
+                    var music = grid.GetComponent<GameplayMusicPlayer>();
+                    Require(music != null && !music.Source.playOnAwake && music.Source.spatialBlend == 0,
+                        "Scene creates a nonspatial gameplay music player");
                     if (grid.GetComponent<GameSession>().State == GameSession.RunState.MainMenu)
                     {
-                        Require(grid.Model.Count == 0 && player.ControlsLocked && !player.Fire(), "Main menu starts without live gameplay");
+                        Require(grid.Model.Count == 0 && player.ControlsLocked && !player.Fire() && !music.InGameplayRun && music.ShouldPlayMusic,
+                            "Main menu starts without live gameplay and requests menu music when local tracks exist");
+                        var menuClip = music.Source.clip;
+                        if (menuClip == null)
+                        {
+                            Require(!music.Source.isPlaying, "Main menu stays silent when no local music is installed");
+                            grid.GetComponent<GameSession>().StartRun();
+                            return;
+                        }
+                        Require(music.ContainsTrack(menuClip.name) && music.Source.isPlaying,
+                            "Main menu starts with local menu music");
+                        int menuPosition = music.Source.timeSamples;
+                        float menuBeat = music.BeatPosition;
                         grid.GetComponent<GameSession>().StartRun();
+                        Require(music.Source.clip == menuClip && music.Source.isPlaying && !music.Source.loop &&
+                            music.Source.timeSamples >= menuPosition && music.Source.timeSamples - menuPosition < menuClip.frequency / 10 &&
+                            music.BeatPosition >= menuBeat && music.BeatPosition - menuBeat < .25f,
+                            "The real menu-to-gameplay transition preserves the playing song, sample position and musical beat");
                         return;
                     }
                     if (grid.GetComponent<GameSession>().State == GameSession.RunState.Refilling)
                     {
-                        Require(grid.Model.Count == 0 && !player.Fire() && !player.ControlsLocked && player.ReadyColor.HasValue,
-                            "Opening starts empty, with movement and a planned player color");
+                        Require(grid.Model.Count == 0 && !player.Fire() && !player.ControlsLocked && player.ReadyColor.HasValue &&
+                            music.ShouldPlayMusic && (music.Source.clip == null || music.Source.isPlaying),
+                            "Opening starts empty, with movement, a planned player color and optional local music");
                         if (!observedEmptyOpening)
                             ScreenCapture.CaptureScreenshot("TestResults/runtime-empty-opening.png");
                         observedEmptyOpening = true;
@@ -200,23 +229,32 @@ namespace CandyCruisers.Editor
                     Require(Vector3.Distance(retreatingEnemy.transform.localPosition, grid.CellPosition(0, 1)) < 0.0001f,
                         "Retreat view follows logical cell");
                     var blueAbility = retreatingEnemy.GetComponent<EnemyAbilities>();
-                    grid.SetColor(retreatingEnemy.Id, EnemyColor.Green);
-                    blueAbility.Tick(0);
-                    grid.SetColor(retreatingEnemy.Id, EnemyColor.Blue);
-                    blueAbility.Tick(0);
+                    if (!liveShieldPrepared)
+                    {
+                        grid.SetColor(retreatingEnemy.Id, EnemyColor.Green);
+                        blueAbility.Tick(0);
+                        grid.SetColor(retreatingEnemy.Id, EnemyColor.Blue);
+                        blueAbility.Tick(0);
+                        liveShieldPrepared = true;
+                    }
                     Require(!retreatingEnemy.IsSpecial, "Single-use shield check uses an ordinary Blue");
-                    if (!blueAbility.ShieldActive) blueAbility.Tick(blueAbility.CooldownRemaining + .35f);
+                    if (!blueAbility.ShieldActive) return;
                     Require(blueAbility.ShieldActive && blueAbility.Absorb(EnemyColor.Red), "Live Blue shield absorbs mismatch");
                     blueAbility.Tick(76);
                     Require(!blueAbility.ShieldActive, "Live spent shield stays down permanently");
                     foreach (var missile in UnityEngine.Object.FindObjectsByType<EnemyMissile>(FindObjectsSortMode.None))
                     { missile.gameObject.SetActive(false); UnityEngine.Object.Destroy(missile.gameObject); }
-                    var shooter = grid.GetComponentsInChildren<GridEnemy>().First(enemy => enemy != retreatingEnemy);
-                    grid.SetColor(shooter.Id, EnemyColor.Red);
-                    shooter.GetComponent<EnemyAbilities>().Tick(25);
+                    liveShooter = grid.GetComponentsInChildren<GridEnemy>().First(enemy => enemy != retreatingEnemy);
+                    grid.SetColor(liveShooter.Id, EnemyColor.Red);
+                    liveShooter.GetComponent<EnemyAbilities>().Tick(0);
+                    phase = 61;
+                }
+                else if (phase == 61)
+                {
                     var fired = UnityEngine.Object.FindObjectsByType<EnemyMissile>(FindObjectsSortMode.None);
+                    if (fired.Length == 0) return;
                     Require(fired.Length == 1, "Live Red emits a missile");
-                    shooter.GetComponent<EnemyAbilities>().enabled = false;
+                    liveShooter.GetComponent<EnemyAbilities>().enabled = false;
                     // Earlier live missiles may have spent lives before this isolated hit check.
                     player.ResetForRun();
                     player.enabled = true;
@@ -259,6 +297,7 @@ namespace CandyCruisers.Editor
                     var pointer = Camera.main.WorldToScreenPoint(new Vector3(0, player.transform.position.y, 0));
                     player.BeginPointer(pointer);
                     player.UpdatePointer(pointer);
+                    ScreenCapture.CaptureScreenshot("TestResults/color-clear-bar-arrival.png");
                     phase = 10;
                 }
                 else if (phase == 10 && grid.GetComponent<GameSession>().State == GameSession.RunState.Playing)
@@ -279,19 +318,19 @@ namespace CandyCruisers.Editor
                     Require(UnityEngine.Object.FindObjectsByType<EnemyMissile>(FindObjectsSortMode.None).All(m => !m.Suspended),
                         "Surviving missiles stay active after refill");
                     var spawner = grid.GetComponent<EnemyRowSpawner>();
-                    player.transform.position = new Vector3(2.95f, player.transform.position.y, 0);
-                    for (int i = batchRows; i < GridModel.Rows; i++) Require(spawner.TryAdvance(), "Fill new fleet");
-                    Require(!spawner.TryAdvance() && grid.GetComponent<GameSession>().State == GameSession.RunState.Playing,
-                        "Bottom row blocks descent without ending the run");
                     while (player.Lives > 1)
                     {
-                        Require(player.Hit(), "Spend lives before final contact");
+                        Require(player.Hit(), "Spend lives before filling the player row");
                         player.TickSurvival(3.1f);
                     }
-                    player.Move(-1, 1);
+                    player.transform.position = new Vector3(2.95f, player.transform.position.y, 0);
+                    for (int i = batchRows; i < GridModel.Rows; i++) Require(spawner.TryAdvance(), "Fill new fleet");
                     Require(grid.GetComponent<GameSession>().State == GameSession.RunState.Dying &&
                         player.Lives == 0 && !player.Alive,
-                        "Touching a bottom-row enemy on the last life starts the death animation before game over");
+                        "A full player row starts the death animation before game over without requiring contact");
+                    var deathMusic = grid.GetComponent<GameplayMusicPlayer>();
+                    Require(!deathMusic.ShouldPlayMusic && !deathMusic.Source.isPlaying && deathMusic.Source.volume == 0,
+                        "Fatal death stops the real audio source immediately, before the death animation advances");
                     int filledEnemies = spawner.CurrentRowWidth * GridModel.Rows;
                     Require(grid.Model.Count == filledEnemies && !player.Fire() && !grid.enabled && !grid.GetComponent<EnemyGridMovement>().enabled,
                         "Game over freezes play without losing enemies");
@@ -302,11 +341,32 @@ namespace CandyCruisers.Editor
                     gameOverAt = EditorApplication.timeSinceStartup;
                     phase = 11;
                 }
-                else if (phase == 11 && EditorApplication.timeSinceStartup - gameOverAt > 1.1 &&
+                else if (phase == 11 &&
                     grid.GetComponent<GameSession>().State == GameSession.RunState.GameOver)
                 {
+                    var session = grid.GetComponent<GameSession>();
+                    var music = grid.GetComponent<GameplayMusicPlayer>();
+                    if (session.GameOverModalOpacity > .15f && session.GameOverModalOpacity < .85f && !observedGameOverFade)
+                    {
+                        Require(!music.Source.isPlaying && music.Source.volume == 0 && session.GameOverBlackoutOpacity == 1,
+                            "The game-over modal fades in over a fully black scene with music stopped");
+                        Require(!session.GameOverMenuReady && !session.HandleMenuKey(KeyCode.Return),
+                            "Invisible and fading options cannot accidentally restart the run");
+                        ScreenCapture.CaptureScreenshot("TestResults/game-over-fading.png");
+                        observedGameOverFade = true;
+                        Time.timeScale = 0;
+                    }
+                    if (session.GameOverMusicGain > 0 || !session.GameOverMenuReady) return;
+                    Require(observedGameOverFade && session.GameOverModalOpacity == 1 && !music.Source.isPlaying,
+                        "Unscaled game-over transition completes with a visible modal and silent music");
+                    Time.timeScale = 1;
                     Require(player.FatallyDefeated && !player.Alive, "Player remains defeated until restart");
                     ScreenCapture.CaptureScreenshot("TestResults/game-over.png");
+                    gameOverAt = EditorApplication.timeSinceStartup;
+                    phase = 21;
+                }
+                else if (phase == 21 && EditorApplication.timeSinceStartup - gameOverAt > .15)
+                {
                     grid.GetComponent<GameSession>().Restart();
                     phase = 12;
                 }
@@ -356,14 +416,28 @@ namespace CandyCruisers.Editor
                     grid.OccupiedHorizontalBounds(out float fleetLeft, out float fleetRight);
                     Require(fleetLeft >= -3.0001f && fleetRight <= 3.0001f, "New live row stays inside border");
                     YellowTransformationChecks.Run();
+                    TouchControlChecks.Run();
                     SpecialEnemyChecks.Run();
+                    AbilityBeatChecks.Run();
                     PurpleYellowSpecialChecks.Run();
                     PresentationChecks.Run();
                     MenuChecks.Run();
+                    WaveTransitionChecks.RunRefillDelayEnvelope();
                     SoundEffectsChecks.Run();
+                    MissileFlightSoundChecks.Run();
+                    MissileBoundaryChecks.Run();
+                    MusicKeyChecks.Run();
+                    TempoMapChecks.Run();
+                    EventPresentationChecks.Run();
+                    GameOverPresentationChecks.Run();
+                    ColorClearCelebrationChecks.Run();
+                    JackpotChecks.Run();
                     PlayerColorAssistChecks.Run();
                     ContactGameOverChecks.Run();
                     PlayerDeathChecks.Run();
+                    PlayerLifeIconChecks.Run();
+                    SafeRespawnChecks.Run();
+                    FullPlayerRowChecks.Run();
                     DeflectedTongueChecks.Run();
                     FleetTickChecks.Run();
                     MissilePersistenceChecks.Run();
@@ -371,6 +445,7 @@ namespace CandyCruisers.Editor
                     AimedRedChecks.Run();
                     OrangeChecks.Run();
                     ComboLeaderboardBackgroundChecks.Run();
+                    ShotColorComboChecks.Run();
                     SpawnPresentationChecks.RunSummonTint();
                     PreparePreview();
                     gameOverAt = EditorApplication.timeSinceStartup;
@@ -451,8 +526,6 @@ namespace CandyCruisers.Editor
                         grid.Model.Count == 2 * RunProgress.StandardRowWidth, "Restart from pause starts a clean running fleet");
                     CompleteRun();
                 }
-                if (phase > 0 && EditorApplication.timeSinceStartup - started > 35)
-                    throw new Exception("Runtime shot failed to return within timeout.");
             }
             catch (Exception error)
             {
@@ -517,7 +590,9 @@ namespace CandyCruisers.Editor
             Require(player.Fire() && tongue.IsMagic && player.MagicCharges == 0, "Live next shot consumes magic");
             tongue.Tick(.0625f, grid);
             player.RefreshPresentation(.41f);
-            Require(session.ProgressBarColor == player.DisplayColor && player.DisplayColor == EnemyPalette.Get(EnemyColor.Yellow),
+            var beatMusic = grid.GetComponent<GameplayMusicPlayer>();
+            var beatColor = (EnemyColor)(Mathf.FloorToInt(Mathf.Max(0, beatMusic.BeatPosition) * 4) % 6);
+            Require(session.ProgressBarColor == player.DisplayColor && player.DisplayColor == EnemyPalette.Get(beatColor),
                 "Progress fill follows the magic player's displayed flash color");
             player.enabled = false;
         }

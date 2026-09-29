@@ -7,18 +7,25 @@ namespace CandyCruisers
     {
         [SerializeField, Min(0.1f)] private float extendSpeed = 14f;
         [SerializeField, Min(0.1f)] private float retractSpeed = 20f;
+        public const float NormalHitRadius = .055f;
+        public const float MagicHitRadius = .11f;
         private LineRenderer line;
         private float travel;
         private float maximumLength;
         private float normalStartWidth, normalEndWidth;
         private bool widthInitialized;
         private float deflectedRetractSpeed;
+        private EnemyColor? returnPreviewColor;
+        private bool returnPreviewMagic;
         public bool IsDeflected => Active && deflectedRetractSpeed > 0;
         // legacy-v1 Tongue.cs: maxSpeed 20, speedFactor = -0.25 + 0.01 * level.
         public static float DeflectedReturnSpeed(int level) => 20f * Mathf.Max(.01f, .25f - .01f * Mathf.Max(1, level));
         public bool Active { get; private set; }
         public bool Retracting => Active && travel >= maximumLength;
         public float Length => Active ? (Retracting ? Mathf.Max(0, 2 * maximumLength - travel) : travel) : 0;
+        public float ReturnSpeed => deflectedRetractSpeed > 0 ? deflectedRetractSpeed : retractSpeed * (IsMagic ? 4 : 1);
+        public float RemainingReturnSeconds => !Active ? 0 :
+            Mathf.Max(0, Retracting ? 2 * maximumLength - travel : maximumLength) / Mathf.Max(.0001f, ReturnSpeed);
         public EnemyColor ShotColor { get; private set; }
         public bool IsMagic { get; private set; }
         public int MagicMultiplier { get; private set; }
@@ -45,9 +52,26 @@ namespace CandyCruisers
             IsMagic = magic;
             MagicMultiplier = 0;
             deflectedRetractSpeed = 0;
+            returnPreviewColor = null;
             maximumLength = length;
             travel = 0;
             Active = true;
+            SetVisualColor(color, magic);
+            Draw();
+            ExtensionStarted?.Invoke();
+            return true;
+        }
+
+        public void SetReturnColor(EnemyColor color, bool magic)
+        {
+            if (!Retracting || returnPreviewColor == color && returnPreviewMagic == magic) return;
+            returnPreviewColor = color;
+            returnPreviewMagic = magic;
+            SetVisualColor(color, magic);
+        }
+
+        private void SetVisualColor(EnemyColor color, bool magic)
+        {
             var plain = new Gradient();
             plain.SetKeys(new[] { new GradientColorKey(EnemyPalette.Get(color), 0), new GradientColorKey(EnemyPalette.Get(color), 1) },
                 new[] { new GradientAlphaKey(1, 0), new GradientAlphaKey(1, 1) });
@@ -64,9 +88,6 @@ namespace CandyCruisers
                 }, new[] { new GradientAlphaKey(1, 0), new GradientAlphaKey(1, 1) });
                 line.colorGradient = gradient;
             }
-            Draw();
-            ExtensionStarted?.Invoke();
-            return true;
         }
 
         public void Tick(float seconds, EnemyGrid grid = null)
@@ -90,7 +111,7 @@ namespace CandyCruisers
                     // its same-color chain before the next nearest contact is queried.
                     bool clearedFleet = false;
                     while (grid.FindMatchingHit(transform.position, travel, nextLength,
-                        ShotColor, .11f, out int magicId, out float magicHitLength, true))
+                        ShotColor, MagicHitRadius, out int magicId, out float magicHitLength, true))
                     {
                         MagicMultiplier += grid.ClearMagicChain(magicId, MagicMultiplier);
                         if (!Active) return;
@@ -114,7 +135,7 @@ namespace CandyCruisers
                     bool stopped = false;
                     // Revealed Yellows cease matching this shot; keep sweeping the same segment.
                     while (grid != null && grid.FindMatchingHit(transform.position, travel, nextLength,
-                        ShotColor, .055f, out int id, out float hitLength))
+                        ShotColor, NormalHitRadius, out int id, out float hitLength))
                     {
                         var result = grid.ResolveTongueHit(id, ShotColor);
                         if (!Active) return;
@@ -141,7 +162,7 @@ namespace CandyCruisers
             }
             if (!wasRetracting && Retracting) RetractionStarted?.Invoke();
             if (!Active) return;
-            float returnRate = deflectedRetractSpeed > 0 ? deflectedRetractSpeed : retractSpeed * (IsMagic ? 4 : 1);
+            float returnRate = ReturnSpeed;
             if (seconds > 0) travel += seconds * returnRate;
             if (travel >= 2 * maximumLength)
             {

@@ -10,6 +10,18 @@ namespace CandyCruisers
         private LineRenderer tendril, portal, streak;
         private float phaseRemaining, shiftRemaining, clock;
         private EnemyColor phaseColor;
+        private bool warpArrival;
+        private bool growing;
+        private Vector3 restingBodyScale;
+        public bool IsWarping => IsPhasing && warpArrival;
+        public void GrowIn(EnemyColor color)
+        {
+            if (!growing) restingBodyScale = body.transform.localScale;
+            growing = true;
+            warpArrival = false;
+            phaseRemaining = .8f;
+            Tick(0, color, 0);
+        }
         private int shiftDirection;
         private GridEnemy target;
         private Vector3 targetPosition;
@@ -30,6 +42,15 @@ namespace CandyCruisers
         }
         private Quaternion restingRotation;
         private bool aimingApplied;
+        public const float GreenSpinSeconds = .35f;
+        private float greenSpinRemaining;
+        private Quaternion greenRestingRotation;
+        public void SpinGreen()
+        {
+            if (body == null) return;
+            if (greenSpinRemaining <= 0) greenRestingRotation = body.transform.localRotation;
+            greenSpinRemaining = GreenSpinSeconds;
+        }
         public void AimRed(Vector3 direction, bool aiming, float seconds, bool firing = false)
         {
             if (body == null || !aiming && !aimingApplied) return;
@@ -90,6 +111,9 @@ namespace CandyCruisers
         public float SpawnOpacity => 1 - phaseRemaining / .8f;
         public void PhaseIn(EnemyColor color, EnemyColor? effectColor = null)
         {
+            if (growing) body.transform.localScale = restingBodyScale;
+            growing = false;
+            warpArrival = true;
             phaseColor = effectColor ?? color;
             phaseRemaining = .8f;
             Tick(0, color, 0);
@@ -98,6 +122,13 @@ namespace CandyCruisers
         public void Tick(float seconds, EnemyColor color, float warning)
         {
             if (body == null) return;
+            if (greenSpinRemaining > 0)
+            {
+                greenSpinRemaining = Mathf.Max(0, greenSpinRemaining - Mathf.Max(0, seconds));
+                float turn = 1 - greenSpinRemaining / GreenSpinSeconds;
+                body.transform.localRotation = greenSpinRemaining > 0 ?
+                    greenRestingRotation * Quaternion.Euler(0, 0, -360 * turn) : greenRestingRotation;
+            }
             clock += seconds;
             phaseRemaining = Mathf.Max(0, phaseRemaining - seconds);
             shiftRemaining = Mathf.Max(0, shiftRemaining - seconds);
@@ -108,13 +139,22 @@ namespace CandyCruisers
             Color tint = EnemyPalette.Get(color);
             Color brilliant = color == EnemyColor.Purple ? new Color(1, .3f, 1) :
                 color == EnemyColor.Green ? new Color(.65f, 1, .75f) : Color.white;
-            body.color = Color.Lerp(tint, brilliant, warning * (.6f + .4f * Mathf.Sin(clock * 28)));
+            var music = GetComponentInParent<GameplayMusicPlayer>();
+            float pulsePhase = music != null && music.InGameplayRun ? music.BeatPosition * Mathf.PI * 4 : clock * 28;
+            body.color = Color.Lerp(tint, brilliant, warning * (.6f + .4f * Mathf.Cos(pulsePhase)));
             if (color == EnemyColor.Green && movementPulseRemaining > 0)
                 body.color = Color.Lerp(body.color, new Color(.85f, 1, .9f),
                     Mathf.Min(1, movementPulseRemaining * 8));
             PresentMovementSurge(color);
             if (phaseRemaining > 0) body.color = new Color(body.color.r, body.color.g, body.color.b, SpawnOpacity);
-            portal.enabled = phaseRemaining > 0;
+            if (growing)
+            {
+                float t = SpawnOpacity - 1;
+                float scale = 1 + 2.2f * t * t * t + 1.2f * t * t;
+                body.transform.localScale = restingBodyScale * Mathf.Max(0, scale);
+                if (phaseRemaining <= 0) { body.transform.localScale = restingBodyScale; growing = false; }
+            }
+            portal.enabled = phaseRemaining > 0 && warpArrival;
             if (portal.enabled)
             {
                 Color riftColor = Color.Lerp(EnemyPalette.Get(phaseColor), Color.white, .25f);
@@ -221,6 +261,10 @@ namespace CandyCruisers
 
         public void Clear()
         {
+            if (growing && body != null) body.transform.localScale = restingBodyScale;
+            growing = false;
+            if (greenSpinRemaining > 0 && body != null) body.transform.localRotation = greenRestingRotation;
+            greenSpinRemaining = 0;
             if (aimingApplied && body != null) body.transform.localRotation = restingRotation;
             aimingApplied = false;
             phaseRemaining = shiftRemaining = imitationRemaining = revealRemaining = movementPulseRemaining = 0;

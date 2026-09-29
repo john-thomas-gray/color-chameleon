@@ -100,6 +100,23 @@ namespace CandyCruisers.Editor
                 }
 
                 var playerVisuals = CharacterVisuals.Ensure(player.gameObject);
+                var streamCue = PresentationCue.Spawn(null, PresentationCue.Kind.Defeat, blue.Visuals.Body, EnemyColor.Blue, 1, 1, true);
+                try
+                {
+                    var stream = streamCue.GetComponentInChildren<EnemyDeathBurst>();
+                    int completions = 0;
+                    streamCue.Completed.AddListener(() => completions++);
+                    stream.Tick(1.2f);
+                    streamCue.Tick(1.2f);
+                    Check(!stream.Finished && !streamCue.Finished && streamCue.gameObject.activeSelf,
+                        "Default defeat cue waits for the stream rather than cutting it off at its old fixed duration");
+                    stream.Tick(EnemyDeathBurst.ColorClearMaxSeconds);
+                    streamCue.Tick(EnemyDeathBurst.ColorClearMaxSeconds);
+                    streamCue.Tick(1);
+                    Check(stream.Finished && streamCue.Finished && completions == 1,
+                        "Defeat cue completes exactly once after all dust has arrived");
+                }
+                finally { UnityEngine.Object.DestroyImmediate(streamCue.gameObject); }
                 int playerFires = 0;
                 playerVisuals.Fired.AddListener(() => playerFires++);
                 player.RefreshColor();

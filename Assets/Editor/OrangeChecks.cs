@@ -50,7 +50,7 @@ namespace CandyCruisers.Editor
                 ability.Tick(10);
                 Check(orange.Column == 0, "Suspension freezes swaps");
                 ability.Suspended = false;
-                ability.Tick(.36f);
+                ability.Tick(AbilityBeatClock.DefaultBeatSeconds);
                 Check(orange.Column == 4 && orange.Row == 0 && target.Column == 0 && target.Row == 1, "Swap updates both views");
                 Check(grid.Model.At(4, 0).Id == orange.Id && grid.Model.At(0, 1).Id == target.Id && grid.Model.Count == 4,
                     "Swap preserves identities, colors and total occupancy");
@@ -93,7 +93,13 @@ namespace CandyCruisers.Editor
                 session.Configure(player);
                 if (!Application.isPlaying) typeof(GameSession).GetMethod("OnEnable",
                     System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(session, null);
-                session.Progress.FinishShot(true); session.Progress.FinishShot(true); session.Progress.BeginShot();
+                for (int shot = 0; shot < 2; shot++)
+                {
+                    session.Progress.BeginShot();
+                    session.Progress.RegisterShotColor(EnemyColor.Red);
+                    session.Progress.FinishShot(true);
+                }
+                session.Progress.BeginShot();
                 Add(grid, EnemyColor.Orange, 0, 0);
                 if (oranges == 3) Add(grid, EnemyColor.Orange, 2, 0);
                 Add(grid, EnemyColor.Orange, 1, 1);
@@ -104,6 +110,8 @@ namespace CandyCruisers.Editor
                 Check(grid.Model.ColorCount(EnemyColor.Orange) == 0 && grid.Model.Count == 1, "Retreat detonates all touching Oranges only");
                 Check(session.Progress.Score == oranges * 500 && session.Progress.Defeated == oranges && ordinaryClears == 0,
                     "Retreat awards exactly five base points per Orange, without borrowing shot combo");
+                Check(session.Progress.ComboStreak == 2 && session.Progress.ActiveComboMultiplier == 3,
+                    "Environmental Orange bursts cannot advance an active shot's combo");
                 Check(grid.HasColorClearBar(EnemyColor.Orange) && grid.SeenColors().Contains(EnemyColor.Orange), "Explosion grants Orange color-clear credit");
                 long score = session.Progress.Score;
                 grid.TickRetreat(1);

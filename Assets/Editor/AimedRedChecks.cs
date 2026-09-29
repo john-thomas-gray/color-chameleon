@@ -47,11 +47,32 @@ namespace CandyCruisers.Editor
                         "Projectile heading matches the triangle and target at launch");
                     Check(red.HitBounds == bounds && red.transform.rotation == Quaternion.identity,
                         "Aim leaves gameplay bounds and fleet transform unchanged");
+                    var smoke = missile.SmokeTrail;
+                    Check(smoke != null && !smoke.enabled, "Aimed shot smoke trail starts empty");
                     var origin = missile.transform.position;
                     player.transform.position = new Vector3(-side, -4.6f, 0);
                     missile.Tick(.2f);
                     Check(Vector3.Distance(missile.transform.position, origin + direction * .7f) < .001f,
                         "Shot flies straight at existing speed after player moves");
+                    Check(smoke != null && smoke.enabled && smoke.positionCount == 4, "Aimed shots draw a smoke trail");
+                    var missileSprite = missile.GetComponent<SpriteRenderer>();
+                    float missileWidth = missileSprite.sprite.bounds.size.x * Mathf.Abs(missile.transform.lossyScale.x);
+                    Check(Mathf.Abs(smoke.startWidth - smoke.endWidth) < .001f &&
+                        Mathf.Abs(smoke.startWidth - missileWidth * EnemyMissile.SmokeTrailWidthRatio) < .001f,
+                        "Aimed shot smoke trail keeps a uniform half-missile width");
+                    Vector3 smokeTail = smoke.GetPosition(0), smokeHead = smoke.GetPosition(smoke.positionCount - 1);
+                    float screenThird = (Camera.main != null && Camera.main.orthographic ?
+                        Camera.main.orthographicSize * 2 : EnemyMissile.FallbackViewHeight) * EnemyMissile.SmokeTrailScreenRatio;
+                    Check(Vector3.Distance(smokeTail, smokeHead) < screenThird &&
+                        Mathf.Abs(Vector3.Distance(smokeTail, smokeHead) - .7f) < .02f,
+                        "Aimed shot smoke trail grows from flight distance before reaching full length");
+                    float smokeAngle = Vector3.Angle(smokeHead - smokeTail, direction);
+                    Check(smokeAngle < .05f,
+                        "Aimed shot smoke trail follows the launch direction (" + smokeAngle + " degrees)");
+                    missile.Tick(1);
+                    smokeTail = smoke.GetPosition(0); smokeHead = smoke.GetPosition(smoke.positionCount - 1);
+                    Check(Mathf.Abs(Vector3.Distance(smokeTail, smokeHead) - screenThird) < .02f,
+                        "Aimed shot smoke trail caps at about one third of the screen");
                     ability.Tick(.01f);
                     Check(Quaternion.Angle(rest, body.localRotation) > .1f && Quaternion.Angle(rest, body.localRotation) < turned + 25,
                         "Return begins gradually after firing");

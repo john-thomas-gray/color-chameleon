@@ -20,20 +20,22 @@ namespace CandyCruisers.Editor
                 movement.Tick(100);
                 Check(movement.CurrentSpeed == 0 && root.transform.position == Vector3.zero, "No Greens means no motion");
                 grid.Model.SetColor(1, EnemyColor.Green);
+                movement.ResetSweep();
+                float beat = FullSetCelebration.StepDuration;
                 Near(movement.CurrentSpeed, .03f, "One Green supplies base movement");
-                movement.Tick(5);
-                Near(root.transform.position.x, .15f, "One Green advances one discrete step");
+                movement.Tick(beat);
+                Near(root.transform.position.x, .03f * beat, "One Green advances one beat-sized tick");
                 grid.Model.TryAdd(2, EnemyColor.Green, 2, 0);
                 Near(movement.CurrentSpeed, .06f, "Two Greens double movement");
-                movement.Tick(2.5);
-                Near(root.transform.position.x, .3f, "Two Greens halve the step interval");
+                movement.Tick(beat);
+                Near(root.transform.position.x, .09f * beat, "Two Greens double the next tick length");
                 grid.Model.Remove(1);
                 Near(movement.CurrentSpeed, .03f, "Removing Green immediately slows fleet");
                 grid.Model.SetColor(2, EnemyColor.Blue);
                 movement.Tick(100);
-                Near(root.transform.position.x, .3f, "Converting last Green immediately stops fleet");
+                Near(root.transform.position.x, .09f * beat, "Converting last Green immediately stops fleet");
                 movement.AdvanceDistance(1);
-                Near(root.transform.position.x, .3f, "Direct movement also respects zero Greens");
+                Near(root.transform.position.x, .09f * beat, "Direct movement also respects zero Greens");
                 grid.Model.Remove(2);
                 movement.ResetSweep();
                 grid.ConfigureAbilities(AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Red Missile.prefab"),
@@ -66,7 +68,7 @@ namespace CandyCruisers.Editor
                 Check(ability.ShieldActive && shield.transform.localPosition == Vector3.zero, "Completed shield returns to its original shape and position");
                 var bodyBounds = blue.GetComponentInChildren<SpriteRenderer>().bounds;
                 Near(shield.bounds.size.x, bodyBounds.size.x * 1.25f,
-                    "Shield retains its original radius and thickness; only the painted arc is shortened");
+                    "Shield retains its original radius and thickness as a full ring");
                 Near(shield.color.r, .82f, "Shield has a bright near-white core");
                 Check(shield.color.a == 1 && ability.Absorb(EnemyColor.Red) && !shield.enabled, "Visible shield absorbs a hit then disappears");
                 ability.Tick(100);
@@ -93,18 +95,21 @@ namespace CandyCruisers.Editor
                 foreach (var enemy in grid.GetComponentsInChildren<GridEnemy>())
                 { grid.Unregister(enemy); UnityEngine.Object.DestroyImmediate(enemy.gameObject); }
                 grid.Model.TryAdd(10, EnemyColor.Green, GridModel.Columns - 1, 0);
+                grid.OccupiedHorizontalBounds(out _, out float rightBeforeContact);
+                float contactX = PlayerMovement.HalfWidth - rightBeforeContact;
+                root.transform.position = Vector3.right * (contactX - movement.CurrentSpeed * beat * .5f);
                 int contacts = 0;
                 Action addGreen = () => { contacts++; grid.Model.TryAdd(11, EnemyColor.Green, 0, 0); };
                 movement.SweepEnded += addGreen;
-                movement.Tick(40);
-                Near(root.transform.position.x, -.15f, "New Green changes speed within the same frame as contact");
-                Check(contacts == 1 && movement.Direction == -1, "Changing speed does not duplicate boundary events");
+                movement.Tick(beat);
+                Check(root.transform.position.x <= contactX + .0001f, "Contact beat stays clamped at the occupied boundary");
+                Check(contacts == 1 && movement.Direction == -1, "Changing Green count does not duplicate boundary events");
                 movement.SweepEnded -= addGreen;
                 grid.Model.Remove(10); grid.Model.Remove(11);
                 movement.ResetSweep();
                 grid.Model.TryAdd(12, EnemyColor.Green, GridModel.Columns - 1, 0);
-                root.transform.position = Vector3.right * 1.125f;
-                movement.Tick(.1);
+                root.transform.position = Vector3.right * contactX;
+                movement.Tick(beat);
                 Check(movement.Direction == -1, "Starting exactly at contact still reverses");
 
                 var tongue = mouth.GetComponent<TongueShot>();

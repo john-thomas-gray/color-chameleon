@@ -79,7 +79,7 @@ namespace CandyCruisers.Editor
                     "Three connected Blues upgrade and produce only the eight exterior edges of an L group");
                 Check(blue.GetComponentInChildren<SpriteRenderer>().sprite == EnemyPlaceholderArt.Triangle &&
                     !blue.Visuals.Root.Find("Shield").GetComponentInChildren<SpriteRenderer>().enabled,
-                    "Tier two uses triangle art and replaces individual arcs with a group perimeter");
+                    "Tier two uses triangle art and replaces individual shields with a group perimeter");
                 player.transform.position = new Vector3(lower.transform.position.x, -4.6f, 0);
                 Check(player.Fire(), "Fire a mismatched ordinary shot at the rigid shield");
                 tongue.Tick(.26f, grid);
@@ -95,7 +95,8 @@ namespace CandyCruisers.Editor
                 player.Move(1, .1f);
                 Check(player.transform.position != position, "Movement resumes after tongue return");
                 player.transform.position = position;
-                player.Fire(); tongue.Tick(.26f, grid);
+                // The return now selects a new ready color; explicitly repeat the mismatched shot.
+                tongue.TryFire(EnemyColor.Red, 10); tongue.Tick(.26f, grid);
                 Check(player.Stunned, "Second mismatch also deflects without breaking shield");
                 player.CancelShot();
                 Check(!player.Stunned, "Cancellation cannot strand the player in grey stun");
@@ -147,7 +148,7 @@ namespace CandyCruisers.Editor
                 Check(homing.transform.position.x > -1.99f && homing.transform.position.x < -1.85f &&
                     Mathf.Abs(Mathf.DeltaAngle(0, homing.transform.eulerAngles.z) - 7.2f) < .01f &&
                     Mathf.Abs(homing.transform.position.y - .6f) < .02f,
-                    "Homing uses original gentle steering and 3.5-unit speed");
+                    "Homing turns directly toward the player with original gentle steering and 3.5-unit speed");
                 homing.Suspended = true;
                 var point = homing.transform.position;
                 homing.Tick(1);
@@ -169,13 +170,19 @@ namespace CandyCruisers.Editor
                 var limited = new GameObject("Limited homing", typeof(EnemyMissile)).GetComponent<EnemyMissile>();
                 limited.SetTarget(player, true);
                 limited.transform.position = new Vector3(-2.9f, 5.29f, 0);
-                player.transform.position = new Vector3(20, 10, 0);
-                limited.Tick(3);
+                for (int step = 0; step < 360; step++)
+                {
+                    player.transform.position = new Vector3(limited.transform.position.x + 2, 10, 0);
+                    limited.Tick(1f / 120);
+                }
                 Check(!limited.Finished && Mathf.Abs(Mathf.DeltaAngle(0, limited.transform.eulerAngles.z) - 50) < .01f,
                     "Homing tilt is capped at 50 degrees even when the target is above");
                 float previousY = limited.transform.position.y;
-                player.transform.position = new Vector3(-20, 10, 0);
-                limited.Tick(.5f);
+                for (int step = 0; step < 60; step++)
+                {
+                    player.transform.position = new Vector3(limited.transform.position.x - 2, 10, 0);
+                    limited.Tick(1f / 120);
+                }
                 Check(limited.transform.position.y < previousY &&
                     Mathf.Abs(Mathf.DeltaAngle(0, limited.transform.eulerAngles.z) - 41) < .01f,
                     "Reversing the target eases steering without looping upward");
@@ -189,7 +196,8 @@ namespace CandyCruisers.Editor
                     escaped.transform.position = new Vector3(side * (PlayerMovement.HalfWidth + .01f), 0, 0);
                     var outside = escaped.transform.position;
                     escaped.Tick(.5f);
-                    Check(escaped.Finished && escaped.transform.position == outside, "Offscreen homing cannot turn back into the field");
+                    Check(escaped.Finished && escaped.transform.position == outside,
+                        "Inaudible offscreen homing missiles retire without wrapping back into the field");
                     UnityEngine.Object.DestroyImmediate(escaped.gameObject);
                 }
                 player.transform.position = new Vector3(2, -4.6f, 0);
@@ -201,9 +209,27 @@ namespace CandyCruisers.Editor
                 UnityEngine.Object.DestroyImmediate(incoming.gameObject);
                 var ordinary = new GameObject("Straight missile", typeof(EnemyMissile)).GetComponent<EnemyMissile>();
                 ordinary.SetTarget(player);
+                Check(ordinary.SmokeTrail != null && !ordinary.SmokeTrail.enabled, "Ordinary missile smoke trail starts empty");
                 ordinary.transform.position = new Vector3(-2, 2, 0);
                 ordinary.Tick(.5f);
                 Check(ordinary.transform.position.x == -2 && !ordinary.Homing, "Ordinary missile stays straight");
+                var smoke = ordinary.SmokeTrail;
+                Check(smoke != null && smoke.enabled && smoke.positionCount == 4, "Missiles draw a smoke trail");
+                Check(Mathf.Abs(smoke.startWidth - smoke.endWidth) < .001f &&
+                    Mathf.Abs(smoke.startWidth - EnemyMissile.FallbackMissileWidth * EnemyMissile.SmokeTrailWidthRatio) < .001f,
+                    "Missile smoke trail keeps a uniform half-missile width");
+                Vector3 smokeTail = smoke.GetPosition(0), smokeHead = smoke.GetPosition(smoke.positionCount - 1);
+                float screenThird = (Camera.main != null && Camera.main.orthographic ?
+                    Camera.main.orthographicSize * 2 : EnemyMissile.FallbackViewHeight) * EnemyMissile.SmokeTrailScreenRatio;
+                Check(Vector3.Distance(smokeTail, smokeHead) < screenThird &&
+                    Mathf.Abs(Vector3.Distance(smokeTail, smokeHead) - 2.5f) < .02f,
+                    "Ordinary missile smoke trail grows from flight distance before reaching full length");
+                ordinary.Tick(.4f);
+                smokeTail = smoke.GetPosition(0); smokeHead = smoke.GetPosition(smoke.positionCount - 1);
+                Check(Mathf.Abs(Vector3.Distance(smokeTail, smokeHead) - screenThird) < .02f,
+                    "Missile smoke trail reaches about one third of the screen");
+                Check(Vector3.Angle(smokeHead - smokeTail, Vector3.down) < .05f,
+                    "Ordinary missile smoke trail follows its heading");
                 UnityEngine.Object.DestroyImmediate(ordinary.gameObject);
                 var flashing = new GameObject("Flashing homing", typeof(SpriteRenderer), typeof(EnemyMissile));
                 var renderer = flashing.GetComponentInChildren<SpriteRenderer>();
@@ -212,19 +238,20 @@ namespace CandyCruisers.Editor
                 var pulse = flashing.GetComponent<EnemyMissile>();
                 flashing.transform.position = Vector3.up * 4.5f;
                 pulse.SetTarget(null, true);
-                pulse.Tick(.75f);
+                float halfFlash = 30f / GameplayMusicPlayer.DefaultBeatsPerMinute * EnemyMissile.DefaultFarFlashBeats;
+                pulse.Tick(halfFlash);
                 Check(renderer.color.g > original.g + .5f && renderer.color.a == original.a,
-                    "Homing missile slowly brightens without becoming transparent");
+                    "Homing missile brightens on its beat flash without becoming transparent");
                 var bright = renderer.color;
                 pulse.Suspended = true;
                 pulse.Tick(1);
                 Check(renderer.color == bright, "Suspension freezes the flash with the missile");
                 pulse.Suspended = false;
-                pulse.Tick(.75f);
-                Check(Vector4.Distance(renderer.color, original) < .001f, "Slow pulse returns to its original color after 1.5 seconds");
+                pulse.Tick(halfFlash);
+                Check(Vector4.Distance(renderer.color, original) < .02f, "Beat pulse returns to its original color after one far flash cycle");
                 pulse.SetTarget(null, false);
-                pulse.Tick(.25f);
-                Check(renderer.color == original, "Ordinary missiles do not flash");
+                pulse.Tick(halfFlash);
+                Check(renderer.color.g > original.g + .5f, "Ordinary missiles share the beat flash");
                 UnityEngine.Object.DestroyImmediate(flashing);
             });
 
@@ -298,7 +325,104 @@ namespace CandyCruisers.Editor
                     if (third != null) UnityEngine.Object.DestroyImmediate(third.gameObject);
                 }
             });
-            Debug.Log("Special enemy checks passed: branching digits, cascade timing, promotion, contours, deflection, stun recovery, matching/magic bypass and homing.");
+            CheckGreenSpin();
+            Debug.Log("Special enemy checks passed: branching digits, cascade timing, promotion, Green activation spin, contours, deflection, stun recovery, matching/magic bypass and homing.");
+        }
+
+        private static void CheckGreenSpin()
+        {
+            Fixture((grid, player, tongue) =>
+            {
+                var green = Add(grid, EnemyColor.Green, 0, 0);
+                var ability = green.GetComponent<EnemyAbilities>();
+                var body = green.Visuals.Body.transform;
+                var resting = Quaternion.Euler(0, 0, 17);
+                body.localRotation = resting;
+                ability.Tick(100);
+                Check(body.localRotation == resting, "Ordinary count-based Greens do not spin");
+                var neighbor = Add(grid, EnemyColor.Green, 1, 0);
+                Add(grid, EnemyColor.Green, 2, 0);
+                grid.RefreshSpecials();
+                ability.Tick(0);
+                ability.Tick(ability.CooldownRemaining);
+                Check(ability.IsCasting && body.localRotation == resting, "Special Green waits until activation to spin");
+                var localPosition = green.transform.localPosition;
+                var boundsSize = green.HitBounds.size;
+                var boundsOffset = green.HitBounds.center - green.transform.position;
+                ability.Tick(10);
+                Check(!ability.IsCasting && body.localRotation == resting,
+                    "A long frame completing the windup cannot consume the new activation spin");
+                float cooldown = ability.CooldownRemaining;
+                ability.Tick(EnemyPresentation.GreenSpinSeconds / 4);
+                Check(Quaternion.Angle(body.localRotation, resting * Quaternion.Euler(0, 0, -90)) < .01f,
+                    "The activating special Green turns a quarter revolution");
+                Check(neighbor.Visuals.Body.transform.localRotation == Quaternion.identity,
+                    "The dash does not spin other fleet members");
+                Check(green.transform.localPosition == localPosition && green.transform.localRotation == Quaternion.identity &&
+                    green.HitBounds.size == boundsSize &&
+                    Vector3.Distance(green.HitBounds.center - green.transform.position, boundsOffset) < .0001f,
+                    "Spin changes only artwork, preserving grid placement and collision dimensions");
+                var pausedRotation = body.localRotation;
+                var pausedPosition = grid.transform.position;
+                float pausedCooldown = ability.CooldownRemaining;
+                ability.Suspended = true;
+                ability.Tick(5);
+                Check(body.localRotation == pausedRotation && grid.transform.position == pausedPosition &&
+                    ability.CooldownRemaining == pausedCooldown, "Pause freezes spin, dash and cooldown together");
+                ability.Suspended = false;
+                ability.Tick(-1);
+                ability.Tick(0);
+                Check(body.localRotation == pausedRotation, "Nonpositive time does not advance the spin");
+                ability.Tick(EnemyPresentation.GreenSpinSeconds / 4);
+                Check(Quaternion.Angle(body.localRotation, resting * Quaternion.Euler(0, 0, -180)) < .01f,
+                    "Resuming continues the spin from its paused angle");
+                ability.Tick(EnemyPresentation.GreenSpinSeconds / 2);
+                Check(Quaternion.Angle(body.localRotation, resting) < .01f &&
+                    Mathf.Abs(grid.transform.position.x - .1f) < .0001f &&
+                    Mathf.Abs(ability.CooldownRemaining - (cooldown - EnemyPresentation.GreenSpinSeconds)) < .0001f,
+                    "One full spin restores the authored pose without changing dash distance or cooldown duration");
+                ability.Tick(ability.CooldownRemaining);
+                ability.Tick(.6f);
+                ability.Tick(.05f);
+                Check(Quaternion.Angle(body.localRotation, resting) > 1, "Each later special activation spins again");
+                grid.SetColor(green.Id, EnemyColor.Red);
+                ability.Tick(0);
+                Check(Quaternion.Angle(body.localRotation, resting) < .01f, "Changing color clears a partial Green spin");
+            });
+            foreach (float step in new[] { .01f, .05f, 2f })
+                Fixture((grid, player, tongue) =>
+                {
+                    var green = Add(grid, EnemyColor.Green, 0, 0);
+                    var presentation = green.GetComponent<EnemyPresentation>();
+                    var body = green.Visuals.Body.transform;
+                    var resting = body.localRotation;
+                    presentation.SpinGreen();
+                    float elapsed = 0;
+                    while (elapsed < EnemyPresentation.GreenSpinSeconds)
+                    {
+                        presentation.Tick(step, EnemyColor.Green, 0);
+                        elapsed += step;
+                    }
+                    Check(Quaternion.Angle(body.localRotation, resting) < .01f, "Spin completes with short or long frames");
+                    presentation.SpinGreen();
+                    presentation.Tick(.05f, EnemyColor.Green, 0);
+                    var ability = green.GetComponent<EnemyAbilities>();
+                    ability.enabled = false;
+                    if (!Application.isPlaying) typeof(EnemyAbilities).GetMethod("OnDisable",
+                        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(ability, null);
+                    Check(Quaternion.Angle(body.localRotation, resting) < .01f, "Disabling an ability restores its artwork pose");
+                });
+            Fixture((grid, player, tongue) =>
+            {
+                grid.GetComponent<EnemyGridMovement>().UseGreenDashes = true;
+                var green = Add(grid, EnemyColor.Green, 0, 0);
+                var ability = green.GetComponent<EnemyAbilities>();
+                ability.Tick(ability.CooldownRemaining);
+                ability.Tick(.6f);
+                ability.Tick(.05f);
+                Check(green.Visuals.Body.transform.localRotation == Quaternion.identity,
+                    "Ordinary legacy dashes do not gain the special-only spin");
+            });
         }
 
         private static GridEnemy Add(EnemyGrid grid, EnemyColor color, int x, int y) => ProgressionChecks.Add(grid, color, x, y);

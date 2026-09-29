@@ -112,7 +112,7 @@ namespace CandyCruisers.Editor
                     "Yellow remains selectable while any Yellow is not transforming");
                 second.GetComponent<EnemyAbilities>().BeginImitation(red);
                 player.RefreshColor();
-                Check(player.ReadyColor == EnemyColor.Yellow, "Beginning transformations preserves an already Yellow player");
+                Check(player.ReadyColor == EnemyColor.Red, "Ready color switches when every Yellow becomes unselectable");
                 Check(!grid.Model.SelectablePlayerColors().Contains(EnemyColor.Yellow) &&
                     grid.Model.AvailableColors().Contains(EnemyColor.Yellow), "All transforming Yellows remain occupied but cannot be selected");
                 for (int i = 0; i < 100; i++)
@@ -186,8 +186,10 @@ namespace CandyCruisers.Editor
                     grid.LastYellowTransformed += () => penalties++;
                     grid.ColorCleared += color => clears++;
                     var ability = yellow.GetComponent<EnemyAbilities>();
+                    Check(player.Fire(), "Player fires before Yellow becomes unselectable");
                     Check(ability.BeginImitation(blue), "Start last Yellow conversion");
-                    Check(player.Fire(), "Player can fire while Yellow transforms");
+                    Check(player.ReadyColor == (playerIsYellow ? EnemyColor.Yellow : EnemyColor.Blue),
+                        "An active shot preserves its color while Yellow transforms");
                     ability.Suspended = true;
                     ability.Tick(10);
                     Check(yellow.Color == EnemyColor.Yellow, "Paused transformation cannot finish");

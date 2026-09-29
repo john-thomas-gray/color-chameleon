@@ -14,15 +14,19 @@ namespace CandyCruisers
         public EnemyColor Color { get; private set; }
         public int Depth { get; private set; }
         public int Multiplier { get; private set; }
+        public bool ColorClear { get; private set; }
         public bool Finished { get; private set; }
+        public float RemainingSeconds => Finished ? 0 : Mathf.Max(0, delay + duration - age);
         private float age, delay;
         private bool started;
+        private SoundEffects sounds;
+        private bool defeatSound;
         private EnemyDeathBurst burst;
         private PlayerDeathBurst playerBurst;
         private LineRenderer ring;
         private UnityEngine.Color tint;
 
-        public static PresentationCue Spawn(PresentationCue prefab, Kind kind, SpriteRenderer source, EnemyColor color, int depth, int? multiplier = null)
+        public static PresentationCue Spawn(PresentationCue prefab, Kind kind, SpriteRenderer source, EnemyColor color, int depth, int? multiplier = null, bool colorClear = false)
         {
             var cue = prefab != null ? Instantiate(prefab, source.transform.position, Quaternion.identity) :
                 new GameObject(kind + " cue").AddComponent<PresentationCue>();
@@ -30,6 +34,9 @@ namespace CandyCruisers
             cue.Color = color;
             cue.Depth = Mathf.Max(1, depth);
             cue.Multiplier = Mathf.Max(1, multiplier ?? cue.Depth);
+            cue.ColorClear = colorClear;
+            cue.sounds = source.GetComponentInParent<EnemyGrid>()?.GetComponent<SoundEffects>();
+            cue.defeatSound = kind == Kind.Defeat;
             cue.delay = kind == Kind.Fire ? 0 : (cue.Depth - 1) * EnemyDeathBurst.RingDelay;
             cue.tint = EnemyPalette.Get(color);
             if (prefab == null)
@@ -41,9 +48,9 @@ namespace CandyCruisers
                 }
                 else if (kind == Kind.Defeat)
                 {
-                    cue.burst = EnemyDeathBurst.Create(source, color, depth, cue.Multiplier);
+                    cue.burst = EnemyDeathBurst.Create(source, color, depth, cue.Multiplier, colorClear);
                     cue.burst.transform.SetParent(cue.transform, true);
-                    cue.duration = EnemyDeathBurst.BurstSeconds;
+                    cue.duration = cue.burst.Duration;
                 }
                 else
                 {
@@ -71,7 +78,12 @@ namespace CandyCruisers
             age += Mathf.Max(0, seconds);
             bool visible = age >= delay;
             if (artwork != null) artwork.SetActive(visible);
-            if (visible && !started) { started = true; Started.Invoke(); }
+            if (visible && !started)
+            {
+                started = true;
+                if (defeatSound && sounds != null) sounds.PlayCue(SoundEffect.EnemyDefeat, SoundEffects.DefeatPitch(Multiplier));
+                Started.Invoke();
+            }
             if (playerBurst != null) playerBurst.Present(age - delay);
             if (ring != null)
             {
@@ -84,6 +96,7 @@ namespace CandyCruisers
                     ring.SetPosition(i, new Vector3(Mathf.Cos(angle), Mathf.Sin(angle), 0) * Mathf.Lerp(.08f, .4f, t));
                 }
             }
+            if (ColorClear && burst != null && !burst.Finished) return;
             if (age >= delay + duration) Finish();
         }
         // Safe for an Animation Event. The duration is a fallback for missing events.

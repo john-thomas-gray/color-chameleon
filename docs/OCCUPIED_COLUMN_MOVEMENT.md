@@ -12,26 +12,28 @@ Contact uses the outer edge of the logical cell, not sprite pixels or shields.
 This keeps movement stable when art changes or shield/animation visuals grow.
 The current scene uses an unrotated grid with positive horizontal scale.
 
-Horizontal speed is now proportional to the live Green count: 0.03 world units
-per second per Green, multiplied by level scaling. Zero Greens means no motion.
-The numerical timing examples below assume one Green at level-one speed.
-`UseGreenDashes` retains the previous nonzero-base-speed mode, disabled by default.
+Horizontal average speed is proportional to the live Green count: 0.03 world
+units per second per Green, multiplied by level scaling. Zero Greens means no
+motion. The numerical timing examples below assume one Green at level-one
+speed. `UseGreenDashes` retains the previous nonzero-base-speed mode, disabled
+by default.
 
-### Discrete Steps
+### Beat-Locked Ticks
 
-The fleet banks that same speed as distance, moving in 0.15-unit steps instead
-of translating every frame. `EnemyGridMovement.stepDistance` controls the size;
-the time between steps is the step distance divided by the current speed.
-Changes to Green count or level affect newly accumulated distance immediately.
-The unfinished distance carries into the next frame, so average speed is unchanged.
-The final step at an edge can be shorter to preserve exact boundary timing.
+The default fleet moves once per current song beat instead of translating every
+frame or waiting on fixed 0.15-unit steps. Each beat tick travels the current
+average speed multiplied by the current beat duration, so Green count and level
+change tick length rather than tick cadence. The fallback editor beat uses the
+default soundtrack tempo when no song is playing. The final beat at an edge can
+be shortened to preserve exact boundary timing, then any remaining beat distance
+is spent after the turn unless the callback stops or resets movement.
 
-Each step flashes one live Green using `EnemyPresentation.MovementPulse`.
+Each beat tick flashes one live Green using `EnemyPresentation.MovementPulse`.
 The rotation starts in row/column order, then repeats; removed or recolored
 Greens are skipped and newly appearing Greens join the queue. Both ordinary
 and special Greens participate. The pulse changes only presentation tint,
 not collision geometry or ability cooldowns. Special-Green dashes remain a
-separate ability. Pause preserves partial step progress; a new wave resets it.
+separate ability. Pause preserves partial beat progress; a new wave resets it.
 
 ## Geometry
 
@@ -63,9 +65,10 @@ occupied columns. `EnemyGrid.OccupiedHorizontalBounds` converts their outer
 edges into world coordinates. Neither operation caches occupancy, so removals
 are reflected on the next movement update.
 
-`EnemyGridMovement.Tick` spends frame time up to each border contact and
-recomputes speed after the spawn callback changes the Green count.
-`AdvanceDistance` handles each segment against the distance to the relevant border:
+`EnemyGridMovement.Tick` tracks beat position and only spends movement when a
+beat boundary is crossed. Long frames can process multiple beat ticks, and each
+new tick reads the live Green count. `AdvanceDistance` handles each tick against
+the distance to the relevant border:
 
 1. If the grid is empty, do not move, turn, or request descent.
 2. If the frame cannot reach the border, move normally in the current direction.

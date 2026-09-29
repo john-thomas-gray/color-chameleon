@@ -11,3 +11,23 @@ TestResults/
 *.slnx
 .vs/
 .idea/
+tools/__pycache__/
+
+# Local soundtrack/audio recordings. Keep beat maps and metadata in Git, but do
+# not commit full music files or their Unity-generated metadata.
+Assets/Resources/**/*.wav
+Assets/Resources/**/*.wav.meta
+Assets/Resources/**/*.mp3
+Assets/Resources/**/*.mp3.meta
+Assets/Resources/**/*.ogg
+Assets/Resources/**/*.ogg.meta
+Assets/Resources/**/*.flac
+Assets/Resources/**/*.flac.meta
+Assets/Resources/**/*.aif
+Assets/Resources/**/*.aif.meta
+Assets/Resources/**/*.aiff
+Assets/Resources/**/*.aiff.meta
+Assets/Resources/**/*.m4a
+Assets/Resources/**/*.m4a.meta
+Assets/Resources/**/*.aac
+Assets/Resources/**/*.aac.meta

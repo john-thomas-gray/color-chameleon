@@ -21,10 +21,11 @@ namespace CandyCruisers.Editor
                 Check(grid.SelectablePlayerColors().SequenceEqual(new[] { EnemyColor.Blue, EnemyColor.Green }),
                     "Every Red immediately above special Blues is excluded; exposed Green remains eligible");
                 player.RefreshColor();
-                Check(player.ReadyColor == EnemyColor.Red, "Existing ready color is not changed retroactively");
+                Check(player.ReadyColor != EnemyColor.Red, "Ready color is rechecked when it becomes unshootable");
+                var inFlight = player.ReadyColor.Value;
                 Check(player.Fire(), "Existing color can still fire");
                 player.RefreshColor(true);
-                Check(player.ReadyColor == EnemyColor.Red && tongue.ShotColor == EnemyColor.Red,
+                Check(player.ReadyColor == inFlight && tongue.ShotColor == inFlight,
                     "Assistance never changes an in-flight shot");
                 tongue.Cancel();
                 for (int i = 0; i < 80; i++)
@@ -34,7 +35,7 @@ namespace CandyCruisers.Editor
                 Check(grid.SelectablePlayerColors().Contains(EnemyColor.Red), "One unblocked enemy restores the entire color");
                 Remove(grid, exposed);
                 Remove(grid, green);
-                grid.TryMove(blue.Id, 2, 6);
+                grid.TryMove(blue.Id, 2, 4);
                 Check(grid.SelectablePlayerColors().SequenceEqual(new[] { EnemyColor.Blue }),
                     "Only Blue remains when every other enemy is directly blocked");
                 for (int i = 0; i < 20; i++)
@@ -72,10 +73,114 @@ namespace CandyCruisers.Editor
                 player.RefreshColor();
                 Check(player.ReadyColor == EnemyColor.Blue, "Reserved next-wave color is rechecked against the arriving front line");
             });
+            CheckReachableColumns();
             CheckBarriers();
             CheckWeights();
+            CheckGreenPopulationBias();
             CheckPlannedWeights();
+            CheckReturnPreview();
             Debug.Log("Player color assistance checks passed: connected Blue barriers, diagonal/vertical paths, gaps, exposed targets, count/row weights, Blue bias, rerolls and refill selection.");
+        }
+
+        private static void CheckReturnPreview()
+        {
+            SpecialEnemyChecks.Fixture((grid, player, tongue) =>
+            {
+                var enemy = Add(grid, EnemyColor.Red, 0, 0);
+                player.RefreshColor();
+                Check(player.Fire(), "Preview fixture fires Red");
+                var line = tongue.GetComponent<LineRenderer>();
+                grid.SetColor(enemy.Id, EnemyColor.Blue);
+                tongue.Tick(.1f, grid);
+                Check(CloseColor(line.startColor, EnemyPalette.Get(EnemyColor.Red)), "Extension retains the fired color");
+                while (tongue.Active && !tongue.Retracting) tongue.Tick(.005f, grid);
+                Check(tongue.Active && tongue.ShotColor == EnemyColor.Red && player.ReadyColor == EnemyColor.Red &&
+                    CloseColor(line.startColor, EnemyPalette.Get(EnemyColor.Blue)) && line.endColor == line.startColor,
+                    "Missed tongue previews the next color without changing outgoing combat color or the player early");
+                tongue.Tick(10, grid);
+                Check(player.ReadyColor == EnemyColor.Blue && CloseColor(player.DisplayColor, line.startColor),
+                    "Player takes the preview color when retraction finishes");
+            });
+
+            SpecialEnemyChecks.Fixture((grid, player, tongue) =>
+            {
+                var target = Add(grid, EnemyColor.Red, 2, 0);
+                player.RefreshColor();
+                Add(grid, EnemyColor.Blue, 4, 0);
+                player.transform.position = new Vector3(target.transform.position.x, -4.6f, 0);
+                Check(player.Fire(), "Color-clear preview fires");
+                while (tongue.Active && !tongue.Retracting) tongue.Tick(.005f, grid);
+                Check(tongue.Active && player.MagicCharges > 0 && !tongue.IsMagic &&
+                    tongue.GetComponent<LineRenderer>().colorGradient.colorKeys.Length == 5,
+                    "A newly earned magic charge gives the returning ordinary tongue a rainbow preview");
+                tongue.Tick(10, grid);
+                player.transform.position = new Vector3(-2.9f, -4.6f, 0);
+                Check(player.Fire() && tongue.IsMagic && player.MagicCharges == 0, "Next shot spends the magic charge");
+                while (tongue.Active && !tongue.Retracting) tongue.Tick(.005f, grid);
+                Check(tongue.Active && tongue.IsMagic && tongue.GetComponent<LineRenderer>().colorGradient.colorKeys.Length == 2 &&
+                    CloseColor(tongue.GetComponent<LineRenderer>().startColor, EnemyPalette.Get(EnemyColor.Blue)),
+                    "Spent magic returns in the next ordinary color while retaining magic shot mechanics");
+                tongue.Tick(10, grid);
+                Check(player.ReadyColor == EnemyColor.Blue, "Spent magic preview matches the next player color");
+            });
+
+            SpecialEnemyChecks.Fixture((grid, player, tongue) =>
+            {
+                var enemy = Add(grid, EnemyColor.Red, 0, 0);
+                player.RefreshColor(); player.Fire(); tongue.Tick(.1f, grid);
+                Remove(grid, enemy);
+                player.PrepareNextWave(new[] { EnemyColor.Blue }, EnemyColor.Blue);
+                tongue.Tick(.001f, grid);
+                Check(tongue.Retracting && CloseColor(tongue.GetComponent<LineRenderer>().startColor, EnemyPalette.Get(EnemyColor.Blue)),
+                    "Empty-fleet return previews the reserved next-wave color");
+                tongue.Tick(10, grid);
+                Check(player.ReadyColor == EnemyColor.Blue, "Next-wave reservation survives retraction");
+            });
+
+            SpecialEnemyChecks.Fixture((grid, player, tongue) =>
+            {
+                Add(grid, EnemyColor.Red, 0, 0);
+                Add(grid, EnemyColor.Blue, 2, 0);
+                Add(grid, EnemyColor.Green, 4, 0);
+                player.RefreshColor(); player.transform.position = new Vector3(-2.9f, -4.6f, 0);
+                player.Fire();
+                while (tongue.Active && !tongue.Retracting) tongue.Tick(.005f, grid);
+                var preview = tongue.GetComponent<LineRenderer>().startColor;
+                for (int i = 0; i < 20; i++) player.RefreshColor(true);
+                Check(tongue.GetComponent<LineRenderer>().startColor == preview, "Repeated refreshes do not reroll a valid returning preview");
+                tongue.Tick(10, grid);
+                Check(CloseColor(player.DisplayColor, preview), "Completing a return never rerolls the reserved valid color");
+            });
+        }
+
+        private static bool CloseColor(Color a, Color b) =>
+            Mathf.Abs(a.r - b.r) + Mathf.Abs(a.g - b.g) + Mathf.Abs(a.b - b.b) < .015f;
+
+        private static void CheckReachableColumns()
+        {
+            SpecialEnemyChecks.Fixture((grid, player, tongue) =>
+            {
+                grid.transform.position = Vector3.up * 3;
+                Add(grid, EnemyColor.Red, 0, 0);
+                Add(grid, EnemyColor.Green, 2, 0);
+                Add(grid, EnemyColor.Purple, 3, 0);
+                Add(grid, EnemyColor.Orange, 5, 0);
+                Add(grid, EnemyColor.Blue, 1, GridModel.Rows - 1);
+                Add(grid, EnemyColor.Blue, 4, GridModel.Rows - 1);
+                player.transform.position = new Vector3(0, -4.6f, 0);
+                for (int i = 0; i < 80; i++)
+                {
+                    player.RefreshColor(true);
+                    Check(player.ReadyColor == EnemyColor.Green || player.ReadyColor == EnemyColor.Purple,
+                        "Center lane rolls only colors in columns reachable between bottom-row blockers");
+                }
+                var centerColor = player.ReadyColor.Value;
+                player.transform.position = new Vector3(-2.8f, -4.6f, 0);
+                player.RefreshColor();
+                Check((player.ReadyColor == EnemyColor.Red || player.ReadyColor == EnemyColor.Orange) &&
+                    player.ReadyColor != centerColor,
+                    "Moving to the wrapped edge lane rechecks colors against newly reachable columns");
+            });
         }
 
         private static void CheckBarriers()
@@ -90,12 +195,12 @@ namespace CandyCruisers.Editor
                 var weights = grid.PlayerColorWeights();
                 Check(grid.SelectablePlayerColors().SequenceEqual(new[] { EnemyColor.Blue, EnemyColor.Green, EnemyColor.Purple }),
                     "A full Blue barrier excludes colors only above it, even with enemies in front");
-                Check(weights[EnemyColor.Blue] == 60 && weights[EnemyColor.Purple] == 9 && weights[EnemyColor.Green] == 8,
-                    "Barrier Blues get double weight; all on-screen enemies of an eligible color add weight");
+                Check(weights[EnemyColor.Blue] == 240 && weights[EnemyColor.Purple] == 63 && weights[EnemyColor.Green] == 32,
+                    "Barrier Blues get double weight and Purple's population bonus includes all eligible-color enemies");
                 for (int i = 0; i < 100; i++)
                 { player.RefreshColor(true); Check(player.ReadyColor != EnemyColor.Red, "Barrier filtering reaches actual player rerolls"); }
                 Remove(grid, barrier[2]);
-                Check(grid.SelectablePlayerColors().Contains(EnemyColor.Red) && grid.PlayerColorWeights()[EnemyColor.Blue] == 25,
+                Check(grid.SelectablePlayerColors().Contains(EnemyColor.Red) && grid.PlayerColorWeights()[EnemyColor.Blue] == 100,
                     "Breaking the wall restores distant colors and removes the Blue bonus");
             });
 
@@ -198,6 +303,60 @@ namespace CandyCruisers.Editor
                 Remove(grid, blue);
                 Check(!grid.PlayerColorWeights().ContainsKey(EnemyColor.Blue), "Removed colors have zero weight");
             });
+        }
+
+        public static void RunMusicSkipAndGreenBiasChecks()
+        {
+            SoundEffectsChecks.Run();
+            CheckGreenPopulationBias();
+            Debug.Log("Music skip and Green population bias checks passed.");
+        }
+
+        public static void CheckGreenPopulationBias()
+        {
+            foreach (var boostedColor in new[] { EnemyColor.Green, EnemyColor.Purple })
+            {
+            SpecialEnemyChecks.Fixture((grid, player, tongue) =>
+            {
+                Check(grid.PlayerColorWeights().Count == 0, "Empty fleet has no weighted colors");
+                for (int i = 0; i < 10; i++) Add(grid, i < 1 ? boostedColor : EnemyColor.Red, i % GridModel.Columns, i / GridModel.Columns);
+                var weights = grid.PlayerColorWeights();
+                Check(weights[boostedColor] == 1 && weights[EnemyColor.Red] == 13, "Below eighteen percent gets no bonus");
+                var converted = grid.Model.At(1, 0);
+                grid.SetColor(converted.Id, boostedColor);
+                weights = grid.PlayerColorWeights();
+                Check(weights[boostedColor] == 14 && weights[EnemyColor.Red] == 48, "Above eighteen percent applies exact seven-to-four relative weighting");
+                UnityEngine.Random.InitState(9031);
+                int greens = 0;
+                for (int i = 0; i < 4000; i++)
+                { player.RefreshColor(true); if (player.ReadyColor == boostedColor) greens++; }
+                Check(greens > 800 && greens < 1010, "Player rerolls use the boosted normalized probability");
+                grid.SetColor(converted.Id, EnemyColor.Red);
+                Check(grid.PlayerColorWeights()[boostedColor] == 1, "Bonus disappears immediately below threshold");
+            });
+            SpecialEnemyChecks.Fixture((grid, player, tongue) =>
+            {
+                AddSpecialBlues(grid, new[] { new Vector2Int(0, 1), new Vector2Int(1, 1), new Vector2Int(2, 1) });
+                for (int column = 0; column < 3; column++) Add(grid, boostedColor, column, 0);
+                Check(!grid.PlayerColorWeights().ContainsKey(boostedColor), "Population bonus cannot bypass a special Blue barrier");
+            });
+            SpecialEnemyChecks.Fixture((grid, player, tongue) =>
+            {
+                for (int i = 0; i < 50; i++) Add(grid, i < 9 ? boostedColor : EnemyColor.Red, i % GridModel.Columns, i / GridModel.Columns);
+                Check(grid.PlayerColorWeights()[boostedColor] == 12, "Exactly eighteen percent does not receive a bonus");
+                grid.SetColor(grid.Model.At(3, 1).Id, boostedColor);
+                Check(grid.PlayerColorWeights()[boostedColor] == 98, "Moving from eighteen to twenty percent activates the bonus");
+            });
+            }
+            SpecialEnemyChecks.Fixture((grid, player, tongue) =>
+            {
+                for (int i = 0; i < 20; i++) Add(grid, i < 4 ? EnemyColor.Green : i < 8 ? EnemyColor.Purple : EnemyColor.Red,
+                    i % GridModel.Columns, i / GridModel.Columns);
+                var weights = grid.PlayerColorWeights();
+                Check(weights[EnemyColor.Green] == 28 && weights[EnemyColor.Purple] == 42 && weights[EnemyColor.Red] == 136,
+                    "Green and Purple independently receive one 75 percent bonus without compounding");
+            });
+            Debug.Log("Green/Purple population checks passed: below/exact/above 18 percent, independent bonuses, rerolls and eligibility.");
         }
 
         private static void CheckPlannedWeights()

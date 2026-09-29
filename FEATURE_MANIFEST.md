@@ -83,6 +83,7 @@ This order is a recommendation, pending the user's implementation choices.
 1. [x] Implement the five-column, eleven-row logical grid with reliable cell
    occupancy, enemy identity, color counts, and neighbor queries.
 2. [x] Add player movement and edge wrapping, with keyboard and touch controls.
+   - [x] Mobile taps near or directly beneath the character shoot without repositioning; distant taps move to their target after release, and dragging repositions without firing. Keep desktop controls unchanged.
 3. [x] Add the extend/retract tongue, one active shot at a time, and shot colors
    selected from enemies currently present.
 4. [x] Implement matching hits and orthogonally connected same-color chains,
@@ -94,7 +95,7 @@ This order is a recommendation, pending the user's implementation choices.
 7. [x] Complete the basic wave loop: descent, new rows, game over, fleet refill,
    position reset, and restart.
 8. [x] Add score and level progression with visible feedback, plus the exact
-   unlock schedule: Red/Blue at level 1, Green at 2, Purple at 4, Yellow at 6.
+   unlock schedule: Red/Blue at level 1, Green at 2, Yellow at 4, Purple at 6.
    Implement the ordinary abilities of newly unlocked types with warning cues.
 9. [ ] Author reusable five-enemy line configurations with level eligibility
    and a simple way to preview each formation.
@@ -114,8 +115,8 @@ Prioritized ahead of steps 5 and 6 at the user's request.
   with the complete editor and Play mode check suites.
 - [x] Turn bottom-row enemy-body contact with the player into game over; stop movement,
   retreat, firing, enemy abilities, and missiles, and show a Restart button.
-- [x] Refill cleared fleets after a one-second pause with a separate 15-enemy
-  Red/Blue batch; reset fleet position and sweep timing while fired missiles persist.
+- [x] Refill cleared fleets after the earned bars run out at one musical beat
+  per bar; reset fleet position and sweep timing while fired missiles persist.
 - [x] Add restart through the game-over button or R key. Reload the scene to
   restore the opening 10 enemies, player state, abilities, and timers.
 - [x] Verify the complete refill, game-over, and restart sequence in Play mode.
@@ -129,7 +130,7 @@ Authored lines and field-aware fairness remain pending.
 - [x] Advance through cumulative defeat thresholds, including multiple levels
   in one clear; show score, level, progress, score feedback, and unlock notices.
 - [x] Gate new rows, refill batches, and Purple summons: Red/Blue at 1, Green
-  at 2, Purple at 4, Yellow at 6. Restart resets score and level.
+  at 2, Yellow at 4, Purple at 6. Restart resets score and level.
 - [x] Give each Green its own warning flash and physical fleet step with green
   speed wakes; bursts obey occupied-column contacts, descent, and game over.
 - [x] Rebalance Green: shorten each dash to 0.1 world units (one third of its
@@ -159,7 +160,7 @@ magic-shot multipliers and special enemy variants.
 
 ### Combat Balance and Magic
 
-- [x] Replace full-ring shields with lower arcs facing the player, retaining
+- [x] Keep ordinary Blue shields as full rings encircling the enemy, retaining
   ordinary shield blocking and matching-color bypass.
 - [x] Spread out abilities with independent cooldown ranges: Red 6-18 seconds,
   Blue recharge 35-75, Green 8-20, Purple 18-50, Yellow 18-40.
@@ -710,8 +711,8 @@ reference for individual rules and original limitations.
 
 - **Rebuild: confirmed** — Level 1 can spawn only Red and Blue enemies.
 - **Rebuild: confirmed** — Green enemies become available starting at Level 2.
-- **Rebuild: confirmed** — Purple enemies become available starting at Level 4.
-- **Rebuild: confirmed** — Yellow enemies become available starting at Level 6.
+- **Rebuild: confirmed** — Yellow enemies become available starting at Level 4.
+- **Rebuild: confirmed** — Purple enemies become available starting at Level 6.
 - **Rebuild: confirmed** — the spawn system should track enemies currently on
   screen and make fairer choices about what enters next.
 - **Rebuild: considered** — use authored five-enemy “line” configurations so
@@ -767,6 +768,49 @@ reference for individual rules and original limitations.
 
 ## Fleet Movement Update
 - [x] Make each Green tick pulse a bright electrical surge with a jagged corona, branching bolts and pale cores.
-- [x] Move the fleet in discrete 0.15-unit ticks at the existing average Green-count and level-adjusted speed.
+- [x] Move the fleet on song-beat ticks whose distance matches the existing average Green-count and level-adjusted speed.
 - [x] Pulse one Green per tick in repeating sequence, skipping dead or recolored enemies and including new Greens.
 - [x] Preserve boundary contact, pause, wave reset, and special-Green dash behavior.
+## Safe Player Respawn
+- [x] A full enemy row at the player's height ends the run regardless of remaining lives or respawn protection, with the death animation before game over (five-wide early levels, six-wide later levels).
+- [x] Respawn at the nearest position with at least one enemy-width of clear space between hitboxes for enemies occupying the player's row.
+- [x] Use live enemy positions, keep the player fully inside the field, and defer blocked respawns until a safe gap opens without spending extra lives.
+## Blue Shield Readability
+- [x] Keep the Blue arc exterior and endpoints fixed while extending its thickness inward over the enemy, fading from a solid outer rim to a fully transparent inner edge.
+## Arrival, Shield And Event Audio Update
+- [x] Give special-Blue group shields a thick inward-fading band while preserving their contour and collision boundary.
+- [x] Make regular row/wave arrivals grow from zero with a small rubber-band overshoot; retain distinct Purple warp portals.
+- [x] Add replaceable sounds for Red firing and shield power-up. Green movement surges and special-Green dashes are visual-only.
+- [x] Add distinct sounds for Yellow transformation, special-Yellow hiding/reveal, and Purple warp arrivals.
+- [x] Play staggered enemy-death sounds with pitch rising along the chain multiplier, plus new-wave, level-up, and one-up cues.
+- [x] Use the existing volume/mute/pause controls and a bounded reusable voice pool for event audio.
+## Color-Clear Celebration
+- [x] Scatter the last defeated group of each color into multicolored spacedust behind surviving enemies, preserving cascade timing and multiplier labels. Dust retains all six enemy colors during scatter and return.
+- [x] Return color-clear spacedust to the player over two beats of the current song after its initial scatter, independently of tongue speed.
+- [x] Render multicolored spacedust as soft round shimmering glints, retaining visible brightness and size until absorption at the player.
+- [x] Randomize spacedust sizes independently of gameplay randomness; use the same shimmering glints for player death fragments and the game-over colored burst.
+- [x] Start the missed-shot combo-break animation when the tongue begins retracting, without replaying it on arrival.
+- [x] Schedule enemy ability cooldowns in randomized whole beats against the playing song's beat map; Green and Orange windups finish on beats. Track changes and seeks retain pending beat intervals.
+- [x] Animate each earned color bar from an oversized raised position into its resting slot.
+- [x] Play ascending reward tones for successive earned bars; reset pitch when the bar sequence is lost or a new wave begins.
+## Musical Reward Notes
+- [x] Tune generated tonal effects and the tongue whistle to the playing soundtrack's relative-major scale, with per-song editable key metadata and preserved cue duration.
+- [x] Play earned bars on the ascending C-major scale (C, D, E, F, G, A), resetting with the bar sequence.
+- [x] Play cascade deaths as a two-octave C-major arpeggio (C, E, G, C, E, G), repeating for long chains with a stable pitched tone.
+## White Background
+- [x] Use a solid white gameplay background with no stars, tint shifts, or wave pulses; keep gameplay text readable in dark ink.
+## Reward-Bar Jackpot
+- [x] Apply the 75% selection-weight bonus independently to eligible Green and Purple when each exceeds 18% of the live fleet; exactly 18% receives no bonus.
+- [x] Add F8 to skip gameplay music in editor/development builds.
+- [x] Add Another Joe and Potential For Anything; use Another Joe on the menu and shuffle all four songs during gameplay, with per-track beat timing for rhythmic presentation.
+- [x] Add labeled menu hotkeys for Play, Resume, Restart, Main Menu, pause, and starting-level adjustment.
+- [x] Clear all earned bars and their spawn locks on accepted player hits and fatal defeat; rejected hits preserve bars.
+- [x] Play ascending power-up tones on the major scale as each bar of a complete set disappears; retain descending power-down tones for partial sets.
+- [x] Play a distinct slot-machine-style bell cascade and major-chord finale when every reward bar is filled, including at maximum lives.
+## Magic Border
+- [x] During live waves, pulse white/current player color independently of earned bars; run the clear transition for partial bar sets too, with descending power-down tones synchronized to earned-bar removal.
+- [x] While a magic bullet is chambered, alternate the cabinet border between white and earned reward-bar colors; increase the flashing speed with each earned bar and restore the player tint when the shot is spent.
+- [x] On a full-fleet clear with every bar earned, cycle the player and border through the bar colors while growing and removing each bar; hold white at the end, then adopt the next fleet's player color exactly when it spawns.
+- [x] Randomize full-set bar removal with double-time white/color flashes; make the final bar the next player's color and guarantee it in the next fleet.
+- [x] Use Disco Descent for gameplay and the previous track for the menu; pulse the gameplay border from the song's beat clock, using white/black when colorless.
+- [x] Correct normal border to earned colors followed by one white step, or solid white with no bars; use a beat-count clear transition with continuous white/color pairs ending on the next player's color, not white.

@@ -10,6 +10,7 @@ namespace CandyCruisers.Editor
         public static void Run()
         {
             CheckLifeReward();
+            CheckHitLosesBars();
             bool previous = SpawnOverride.Enabled;
             int types = SpawnOverride.Types;
             var random = UnityEngine.Random.state;
@@ -78,6 +79,36 @@ namespace CandyCruisers.Editor
                 UnityEngine.Random.state = random;
             }
             Debug.Log("Color cycle checks passed: row/summon exclusion, override locks, stable eligibility counts and refill reset.");
+        }
+
+        private static void CheckHitLosesBars()
+        {
+            foreach (bool fatal in new[] { false, true })
+            SpecialEnemyChecks.Fixture((grid, player, tongue) =>
+            {
+                if (fatal)
+                    for (int i = 0; i < PlayerMovement.MaxLives - 1; i++)
+                    { player.Hit(); player.TickSurvival(4); }
+                var red = ProgressionChecks.Add(grid, EnemyColor.Red, 0, 0);
+                var blue = ProgressionChecks.Add(grid, EnemyColor.Blue, 2, 0);
+                ProgressionChecks.Add(grid, EnemyColor.Green, 4, 0);
+                grid.ClearMatchingChain(red.Id, EnemyColor.Red);
+                grid.ClearMatchingChain(blue.Id, EnemyColor.Blue);
+                Check(grid.HasColorClearBar(EnemyColor.Red) && grid.HasColorClearBar(EnemyColor.Blue), "Fixture earns multiple bars");
+                player.ControlsLocked = true;
+                Check(!player.Hit() && grid.HasColorClearBar(EnemyColor.Red), "Rejected hit preserves bars");
+                player.ControlsLocked = false;
+                Check(player.Hit() && grid.SeenColors().All(c => !grid.HasColorClearBar(c)), "Accepted hit clears every earned bar, including fatal hits");
+                Check(grid.SeenColors().Count == 3 && !grid.IsColorCleared(EnemyColor.Red) && !grid.IsColorCleared(EnemyColor.Blue),
+                    "Hit removes spawn locks without resetting seen-color history");
+                if (fatal) return;
+                player.TickSurvival(2);
+                red = ProgressionChecks.Add(grid, EnemyColor.Red, 0, 0);
+                grid.ClearMatchingChain(red.Id, EnemyColor.Red);
+                Check(player.Invulnerable && !player.Hit() && grid.HasColorClearBar(EnemyColor.Red), "Invulnerability rejection preserves newly earned bars");
+                player.BeginFatalDefeat();
+                Check(!grid.HasColorClearBar(EnemyColor.Red), "Direct fatal contact also removes bars");
+            });
         }
 
         private static void CheckLifeReward()

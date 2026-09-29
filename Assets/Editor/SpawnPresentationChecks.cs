@@ -54,7 +54,7 @@ namespace CandyCruisers.Editor
                     grid.Unregister(removed); UnityEngine.Object.DestroyImmediate(removed.gameObject);
                     var summoned = spawner.TrySummon(grid.View(grid.Model.At(0, 0).Id));
                     Check(summoned != null, "Summon created");
-                    VerifyArrival(summoned, color);
+                    VerifyArrival(summoned, color, true);
                     foreach (var enemy in grid.GetComponentsInChildren<GridEnemy>())
                     { grid.Unregister(enemy); UnityEngine.Object.DestroyImmediate(enemy.gameObject); }
                     var opening = spawner.PlanOpening();
@@ -98,7 +98,7 @@ namespace CandyCruisers.Editor
                     Check(summoned != null && summoned.Color == color && grid.Model.At(summoned.Column, summoned.Row).Color == color,
                         "Portal tint does not change actual enemy color");
                     var ability = summoned.GetComponent<EnemyAbilities>();
-                    VerifyArrival(summoned, special ? EnemyColor.Purple : color);
+                    VerifyArrival(summoned, special ? EnemyColor.Purple : color, true);
                     var rift = summoned.Visuals.Root.Find("Summoning rift").GetComponent<LineRenderer>();
                     var expected = (Color32)Color.Lerp(EnemyPalette.Get(special ? EnemyColor.Purple : color), Color.white, .25f);
                     for (int i = 0; i < 3; i++)
@@ -121,11 +121,18 @@ namespace CandyCruisers.Editor
             finally { SpawnOverride.Enabled = enabled; SpawnOverride.Types = types; }
             Debug.Log("Summon tint checks passed: all colors, both Purple tiers, persistent portal tint, body identity and completion.");
         }
-        private static void VerifyArrival(GridEnemy enemy, EnemyColor color)
+        private static void VerifyArrival(GridEnemy enemy, EnemyColor color, bool warp = false)
         {
             Check(enemy.GetComponent<EnemyPresentation>().IsPhasing && enemy.GetComponentInChildren<SpriteRenderer>().color.a == 0,
                 "Spawn begins transparent without a full-opacity frame");
             var rift = enemy.Visuals.Root.Find("Summoning rift").GetComponent<LineRenderer>();
+            if (!warp)
+            {
+                Check(!rift.enabled && !enemy.GetComponent<EnemyPresentation>().IsWarping &&
+                    enemy.Visuals.Body.transform.localScale.sqrMagnitude < .000001f,
+                    "Regular arrivals start at zero scale with no portal");
+                return;
+            }
             // LineRenderer stores gradient colors at byte precision.
             Color expected = (Color32)Color.Lerp(EnemyPalette.Get(color), Color.white, .25f);
             Check(rift.enabled && Vector3.Distance(new Vector3(rift.startColor.r, rift.startColor.g, rift.startColor.b),

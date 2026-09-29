@@ -81,14 +81,18 @@ namespace CandyCruisers.Editor
             {
                 var enemy = Add(grid, 2);
                 player.transform.position = new Vector3(enemy.transform.position.x, -4.6f, 0);
-                Check(session.CheckPlayerContact() && player.Lives == 2 && session.State == GameSession.RunState.Playing,
+                Check(session.CheckPlayerContact() && player.Lives == PlayerMovement.MaxLives - 1 &&
+                    session.State == GameSession.RunState.Playing,
                     "First contact spends one life");
                 player.TickSurvival(3.1f);
-                Check(session.CheckPlayerContact() && player.Lives == 1 && session.State == GameSession.RunState.Playing,
-                    "Second contact spends one life");
+                player.transform.position = new Vector3(enemy.transform.position.x, -4.6f, 0);
+                Check(session.CheckPlayerContact() && player.Lives == 1 && player.ExtraLives == 0 &&
+                    session.State == GameSession.RunState.Playing,
+                    "Second contact consumes the final spare and still permits respawn");
                 player.TickSurvival(3.1f);
+                player.transform.position = new Vector3(enemy.transform.position.x, -4.6f, 0);
                 Check(session.CheckPlayerContact() && player.Lives == 0 && session.State == GameSession.RunState.Dying &&
-                    player.ControlsLocked, "Final contact starts death and locks controls");
+                    player.ControlsLocked, "Third contact starts death and locks controls");
             });
             Debug.Log("Contact game-over checks passed: bottom capacity, continued sweeping, contact lives, invulnerable respawn, pause, long moves, wrap and recovery.");
         }

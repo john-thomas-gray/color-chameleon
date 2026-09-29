@@ -39,9 +39,9 @@ from level 7 onward.
 | 1 | Red, Blue | Red, Blue | 5 | 10 enemies | 100 | 10,000 | 1.00 |
 | 2 | Green | Red, Blue, Green | 5 | 10 enemies | 110 | 20,000 | 1.03 |
 | 3 | None | Red, Blue, Green | 5 | 15 enemies | 120 | 30,000 | 1.06 |
-| 4 | Purple | Red, Blue, Green, Purple | 5 | 25 enemies | 130 | 40,000 | 1.09 |
-| 5 | None | Red, Blue, Green, Purple | 5 | 25 enemies | 140 | 50,000 | 1.12 |
-| 6 | Yellow | Red, Blue, Green, Purple, Yellow | 5 | 25 enemies | 150 | 60,000 | 1.15 |
+| 4 | Yellow | Red, Blue, Green, Yellow | 5 | 25 enemies | 130 | 40,000 | 1.09 |
+| 5 | None | Red, Blue, Green, Yellow | 5 | 25 enemies | 140 | 50,000 | 1.12 |
+| 6 | Purple | Red, Blue, Green, Purple, Yellow | 5 | 25 enemies | 150 | 60,000 | 1.15 |
 | 7-8 | None | Red, Blue, Green, Purple, Yellow | 6 | 36 enemies | `100 + 10 * (level - 1)` | `10000 * level` | `min(2, 1 + 0.03 * (level - 1))` |
 | 9+ | Orange | Red, Blue, Green, Purple, Yellow, Orange | 6 | 36 enemies | `100 + 10 * (level - 1)` | `10000 * level` | `min(2, 1 + 0.03 * (level - 1))` |
 
@@ -55,8 +55,8 @@ summons. Existing enemies never change type just because the level changes.
 | Red | 1 | Can appear immediately. Its points and cooldown scaling follow the current level. |
 | Blue | 1 | Can appear immediately. Its points and cooldown scaling follow the current level. |
 | Green | 2 | Adds fleet movement because each live Green contributes speed. |
-| Purple | 4 | Adds ordinary and tier-two summon threats to eligible fleets. |
-| Yellow | 6 | Adds transformation, disguise and Yellow-clear reward pressure to eligible fleets. |
+| Yellow | 4 | Adds transformation, disguise and Yellow-clear reward pressure to eligible fleets. |
+| Purple | 6 | Adds ordinary and tier-two summon threats to eligible fleets. |
 | Orange | 9 | Adds swap and spacing pressure to eligible fleets. |
 
 Color-clear locks and editor spawn overrides can further filter this pool. Those
@@ -98,11 +98,24 @@ fleet speed = 0.03 * live Green count * fleet speed multiplier
 ```
 
 That means a Red/Blue-only level-one fleet does not move horizontally until a
-Green exists. The multiplier reaches its cap at level 35.
+Green exists. Movement ticks stay locked to the song beat; this speed changes
+the distance of each beat tick. The multiplier reaches its cap at level 35.
 
 ## Cooldown Changes
 
-Ability cooldown ranges are defined in `CombatBalance.CooldownRange`. The
+Abilities now schedule integer beat deadlines using `CombatBalance.CooldownBeats`
+and the current track's actual playback position and beat map. Spawning between
+beats aligns the first deadline to the music grid. Green dash and Orange swap
+windups last one beat; their actions also land on a beat. Other animation and
+projectile durations remain independent of the cooldown scheduler.
+
+The ranges below are legacy reference-tempo balance inputs, not runtime timers.
+`CooldownBeats` converts their minimum upward and maximum downward to whole
+beats at 115.03 beats per minute. At level one this yields Red/Blue 5-14 beats,
+Green/Purple 12-17 beats, and Yellow/Orange 3-8 beats. Faster music consequently
+produces faster abilities. Random beat intervals retain per-enemy variation.
+
+Reference cooldown ranges are defined in `CombatBalance.CooldownRange`. The
 current source ranges are multiplied by 0.75, then each level above one subtracts
 0.25 seconds from the maximum. The maximum never goes below the minimum plus
 three seconds.
@@ -120,13 +133,8 @@ use the current level.
 
 ## Visual Changes
 
-The background has two separate progression cues:
-
-- when a new fleet wave arrives, the current star field briefly brightens and scales up,
-- when the level changes, the game cross-fades to the next generated starfield,
-- the starfield set contains ten variants and cycles after level 10,
-- each level increases spin speed,
-- every level change reverses spin direction.
+The background does not change by level. It stays solid black during the main
+menu, wave arrivals, level changes, pause, and game over.
 
 The level-progress bar continues to show progress toward the next defeated-enemy
 threshold. Color-clear blocks at the bottom are not level thresholds; they track
@@ -138,7 +146,7 @@ These systems can affect difficulty, scoring or presentation, but they are not
 level-progression rules:
 
 - tier-two promotion, which is driven by same-color group size,
-- combo streak count, which is driven by consecutive non-missing shots,
+- combo streak count, which advances once per distinct color destroyed in each shot and resets on misses or player damage,
 - magic charges, which are driven by last-of-color clears,
 - color-clear spawn locks, which are driven by bottom color blocks,
 - leaderboard entries, which are recorded at game over,

@@ -7,6 +7,8 @@ namespace CandyCruisers.Editor
 {
     public static class GameplayUpgrade
     {
+        private const string MissileSpritePath = "Assets/Art/missile.png";
+
         public static void Apply()
         {
             EditorSceneManager.OpenScene(GameplaySetup.ScenePath);
@@ -88,13 +90,27 @@ namespace CandyCruisers.Editor
             if (existing != null) return existing;
             var instance = new GameObject("Red Missile", typeof(SpriteRenderer), typeof(EnemyMissile));
             var renderer = instance.GetComponent<SpriteRenderer>();
-            renderer.sprite = AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Art/PlayerPlaceholder.png");
-            renderer.color = new Color(1f, 0.48f, 0.28f);
+            ImportMissileSprite();
+            renderer.sprite = AssetDatabase.LoadAssetAtPath<Sprite>(MissileSpritePath);
+            renderer.color = new Color(1f, 0.12f, 0.08f);
+            renderer.flipY = true;
             renderer.sortingOrder = 25;
-            instance.transform.localScale = new Vector3(0.14f, 0.32f, 1);
+            instance.transform.localScale = new Vector3(0.5f, 0.42f, 1);
             var prefab = PrefabUtility.SaveAsPrefabAsset(instance, path);
             Object.DestroyImmediate(instance);
             return prefab;
+        }
+
+        private static void ImportMissileSprite()
+        {
+            AssetDatabase.ImportAsset(MissileSpritePath);
+            var importer = (TextureImporter)AssetImporter.GetAtPath(MissileSpritePath);
+            importer.textureType = TextureImporterType.Sprite;
+            importer.spriteImportMode = SpriteImportMode.Single;
+            importer.spritePixelsPerUnit = 484;
+            importer.alphaIsTransparency = true;
+            importer.mipmapEnabled = false;
+            importer.SaveAndReimport();
         }
 
         public static void RebuildShieldSprite() => CreateShieldSprite();
@@ -103,16 +119,13 @@ namespace CandyCruisers.Editor
         {
             const string path = "Assets/Art/ShieldArc.png";
             var texture = new Texture2D(128, 128, TextureFormat.RGBA32, false);
-            // At the original 1.25 body-diameter scale, the outer endpoint chord is one body diameter.
-            float halfChord = 128f / 1.25f / 2;
-            float endAngleCos = Mathf.Sqrt(1 - Mathf.Pow(halfChord / 63f, 2));
             for (int y = 0; y < 128; y++)
             for (int x = 0; x < 128; x++)
             {
                 float radius = Vector2.Distance(new Vector2(x + 0.5f, y + 0.5f), new Vector2(64, 64));
-                float ring = Mathf.Clamp01(63 - radius) * Mathf.Clamp01(radius - 58);
-                float arc = Mathf.Clamp01((64 - (y + .5f)) - radius * endAngleCos);
-                texture.SetPixel(x, y, new Color(1, 1, 1, ring * arc));
+                // Preserve the solid outer rim; extend inward over the enemy with a soft fade.
+                float ring = Mathf.Clamp01(63.5f - radius) * Mathf.SmoothStep(0, 1, Mathf.InverseLerp(35, 60, radius));
+                texture.SetPixel(x, y, new Color(1, 1, 1, ring));
             }
             texture.Apply();
             File.WriteAllBytes(path, texture.EncodeToPNG());

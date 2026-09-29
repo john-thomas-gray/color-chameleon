@@ -3,9 +3,19 @@
 ## Recoverable Death And Forcefield Return
 
 Missile hits and the last-Yellow transformation penalty use the same replaceable
-player-death cue as fatal contact. The player flashes and bursts into fragments,
-then respawns at 1.5 seconds with protection lasting until three seconds after
-the hit. The fleet keeps moving; ordinary pause also pauses recovery animation.
+player-death cue as fatal contact. Each run starts with the active player plus
+three spare lives. Three miniature players replace the numeric Lives readout;
+their artwork, color and offbeat pulse match the player. After the player's death
+cue finishes, the rightmost spare grows for 0.18 seconds and bursts into fragments
+over 0.32 seconds, then disappears before respawn. The first three deaths spend
+spares; a fourth death ends the run unless a life has been regained. Full reward
+bar sets replenish one spare, capped at three.
+
+Normal respawn remains at 1.5 seconds with protection lasting until three seconds
+after the hit. Longer replacement death cues delay the spare animation and retain
+1.5 seconds of protection after respawn. The fleet keeps moving; ordinary pause
+also pauses recovery and the spare-life animation. A full enemy row at the player
+still forces game over regardless of spare lives.
 
 Special Blue forcefields slow the stunned tongue's return using the archived
 `legacy-v1:Candy Cruisers/Assets/Scripts/Tongue.cs` rule: `maxSpeed = 20` (also
@@ -110,15 +120,27 @@ nor reset the peak. Every new accepted shot resets it; rejected fire does not.
 Both shot types hide the first multiplier's label while still awarding its
 base points. Defeat progression still counts actual enemies.
 
-The combo streak is separate from death digits and magic-chain peaks. A shot
-snapshots the current combo when it is accepted. If it defeats at least one
-enemy, all enemy points from that shot use that combo; when the tongue returns
-or is canceled, the next accepted shot's combo increases by one. The first
-successful shot uses x1, the next uninterrupted successful shot uses x2, then
-x3, and so on. A shot that defeats no enemies resets the streak when it returns
-or is canceled. Rejected fire commands do not reset it. A player hit resets the
-streak immediately. Multi-chain magic shots use one combo snapshot for the
-whole shot, so they do not increase their own combo while still in flight.
+The combo streak is separate from death digits and magic-chain peaks. Each
+contact scores its entire connected chain using the current combo, then awards
+one streak point per distinct true enemy color destroyed by this shot. This
+updates the displayed and scoring multipliers immediately, before a magic shot
+resolves its next contact, even when several contacts happen in one frame.
+Starting at x1, a Red hit scores at x1 and raises the combo to x2; a Green hit
+then scores at x2 and raises it to x3. Another disconnected Red group scores at
+x3 but cannot award Red again in that shot. A new shot can earn Red again.
+
+Basic Yellow's active attachment links count both Yellow and the linked group's
+true color for ordinary and magic shots. All colors in that contact score at the
+pre-contact multiplier; the next contact benefits from every new color earned.
+Special Yellow disguises still count only as Yellow. A hit need not eliminate
+every on-screen enemy of its color to advance the combo. Environmental Orange
+bursts, shield absorption and disguise reveals award no streak points.
+
+Returning or canceling a successful shot adds no extra point. A shot that
+defeats no enemies resets the streak when retraction begins or it is canceled.
+Rejected fire commands do not reset it, and a player hit resets it immediately.
+Shot feedback adds the already-awarded subtotal to the current calculation,
+such as `300 + 100 x4 = +700`, without multiplying earlier hits again.
 
 Clearing the fleet adds `10000 * level`, without a digit or combo multiplier.
 Both use the level before that clear.
@@ -132,7 +154,7 @@ A large clear can cross multiple thresholds without losing progression.
 | 1 | Red, Blue | 10 |
 | 2 | Red, Blue, Green | 10 |
 | 3 | Red, Blue, Green | 15 |
-| 4-5 | Red, Blue, Green, Purple | 25 |
+| 4-5 | Red, Blue, Green, Yellow | 25 |
 | 6 | Red, Blue, Green, Purple, Yellow | 25 |
 | 7-8 | Red, Blue, Green, Purple, Yellow | 36 |
 | 9+ | All six | 36 |
@@ -231,11 +253,18 @@ remaining visual transition finishes as a disguise rather than a conversion.
 Default movement is `0.03 * liveGreenCount * levelSpeedMultiplier` world units
 per second. There is no movement with zero Greens, including the Red/Blue-only
 opening. Counts are read from the live grid, including Yellow conversions.
-After a boundary adds a row, remaining frame time uses the updated count.
+Movement is spent only on song beats: tick cadence stays on beat, while each
+tick length is the current speed multiplied by the current beat duration. If a
+long frame crosses multiple beats, later beat ticks use any updated Green count.
 
 Tier-two Greens add the retained fast-forward dash: individual 0.1-unit bursts
 over 0.18 seconds, preceded by a 0.6-second flashing warning and fleet-wide
-speed-wake visuals. Each samples a fresh 6-15-second cooldown on promotion and
+speed-wake visuals. On activation, only the activating special Green's body
+spins one full turn over 0.35 seconds, then restores its resting orientation.
+The spin pauses with gameplay, clears on color changes or disabling, and never
+changes grid placement, hitboxes, or dash distance. Ordinary Greens, including
+those using the legacy dash option, do not spin.
+Each samples a fresh 6-9-second cooldown on promotion and
 after activation, subject to level scaling. Promotion cannot immediately release
 an overdue ordinary-enemy timer. Both tiers still contribute to count-based speed;
 ordinary Greens do not cast or dash.
@@ -252,7 +281,7 @@ unspent burst; suspending the run stops its timer and movement contribution.
 ## Shared Difficulty Scaling
 
 Starting cooldown ranges are Red 2.25-7.5 seconds, Blue recharge 2.25-7.5,
-special/legacy Green dashes 6-15, Purple 6-9, and Yellow 1.5-4.5. Each enemy independently resamples its
+special/legacy Green dashes 6-9, Purple 6-9, and Yellow 1.5-4.5. Each enemy independently resamples its
 interval after activation. Ordinary Blue starts unshielded, with its initial
 cooldown counting from spawn. Only after that cooldown expires does its shield
 power up for 0.35 seconds; it cannot protect or render during the spawn rift.
@@ -271,7 +300,11 @@ older, stronger Purple/Yellow cooldown scaling.
 Fleet base speed increases by 3% of its initial value per level, capped at twice
 the initial speed. With the default 0.03 units/second per Green, level 6 moves at 0.0345 per Green.
 Green's 0.1-unit burst remains separate and does not grow with level.
-`CombatBalance` centralizes these tuning values.
+`CombatBalance` centralizes these tuning values. Basic and special abilities
+have separate tuning entries, selected from the enemy's actual tier whenever
+a cooldown is sampled. Both entries currently retain the same values and share
+the same level scaling. Existing countdowns finish normally; special abilities
+replace their basic counterparts rather than running a second simultaneous cast.
 
 ## Magic Shot
 
@@ -339,12 +372,12 @@ disguise instead of ordinary linked transformation, as detailed above.
 
 An active tier-two Blue shields its whole connected Blue group with a rigid
 outline along the exposed cell edges, including concave boundaries. Internal
-edges and individual arcs are hidden; disconnected groups have separate shields.
+edges and individual shields are hidden; disconnected groups have separate shields.
 The shield waits for the existing arrival/power-up sequence. A non-Blue ordinary
 tongue hits the perimeter and retracts without damaging the shield. The player
 and tongue turn grey, movement and firing stop, and the stun ends exactly when
 the tongue finishes or is canceled. Blue shots and magic bypass the shield.
-Ordinary Blues retain their existing breakable arc shields.
+Ordinary Blues retain their existing breakable full-ring shields.
 
 Tier-two Reds retain the existing cooldown and .45-second firing warning.
 During the warning, the triangle rotates toward the player's current position
@@ -411,8 +444,11 @@ remain live during phase-in. The centralized spawn path triggers the effect for
 opening fleets, ordinary rows, refills, and summons without duplicate triggers.
 
 The last hit no longer cancels the tongue. It retracts visibly while the fleet
-is paused, and the refill waits for both the configured delay and the tongue's
-return. Player movement remains active, but firing into an empty field is blocked.
+is paused, and the earned bars run out at one current-song beat per bar. Removing
+the last bar leaves the field empty and holds the player's final color; the next
+fleet starts on the following music beat, never on the bar-removal update. With
+no active music, this gap lasts one beat at the current tempo. Pause also freezes
+the gap. Player movement remains active, but firing into an empty field is blocked.
 
 At fleet clear, the spawner prepares the exact next batch using the new level
 and current override. The player keeps the outgoing shot color until the tongue

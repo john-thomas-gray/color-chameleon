@@ -47,17 +47,19 @@ namespace CandyCruisers
         }
         public event System.Action FleetCleared;
         public event System.Action<EnemyColor> ColorCleared;
+        public event System.Action<EnemyColor> EnemyDestroyed;
         public event System.Action LastYellowTransformed;
         public event System.Action<int, bool, int> MatchCleared;
+        public event System.Action<EnemyColor> MatchColorScored;
         public event System.Action<int, bool, int> OrangeBurstCleared;
-        public List<EnemyColor> SelectablePlayerColors()
+        public List<EnemyColor> SelectablePlayerColors(bool[] allowedColumns = null)
         {
-            var choices = new List<EnemyColor>(PlayerColorWeights().Keys);
+            var choices = new List<EnemyColor>(PlayerColorWeights(allowedColumns).Keys);
             choices.Sort();
             return choices;
         }
 
-        public Dictionary<EnemyColor, int> PlayerColorWeights()
+        public Dictionary<EnemyColor, int> PlayerColorWeights(bool[] allowedColumns = null)
         {
             var weights = new Dictionary<EnemyColor, int>();
             var eligible = new HashSet<EnemyColor>();
@@ -65,6 +67,7 @@ namespace CandyCruisers
             for (int column = 0; column < GridModel.Columns; column++)
                 for (int row = 0; row < GridModel.Rows; row++)
                 {
+                    if (allowedColumns != null && (column >= allowedColumns.Length || !allowedColumns[column])) continue;
                     var enemy = Model.At(column, row);
                     if (enemy == null) continue;
                     int weight = row + 1;
@@ -78,6 +81,14 @@ namespace CandyCruisers
                 }
             foreach (var color in new List<EnemyColor>(weights.Keys))
                 if (!eligible.Contains(color)) weights.Remove(color);
+            bool boostGreen = weights.ContainsKey(EnemyColor.Green) && Model.ColorCount(EnemyColor.Green) * 100 > Model.Count * 18;
+            bool boostPurple = weights.ContainsKey(EnemyColor.Purple) && Model.ColorCount(EnemyColor.Purple) * 100 > Model.Count * 18;
+            if (boostGreen || boostPurple)
+            {
+                // Scale once so qualifying colors each receive exactly 1.75x their original weight.
+                foreach (var color in new List<EnemyColor>(weights.Keys))
+                    weights[color] *= color == EnemyColor.Green && boostGreen || color == EnemyColor.Purple && boostPurple ? 7 : 4;
+            }
             return weights;
         }
 
@@ -343,11 +354,12 @@ namespace CandyCruisers
                 removedColors.Add(enemy.Color);
                 int animationDepth = depths[clearedId];
                 var match = enemy.Visuals.Match(enemy.Color, animationDepth, multipliers[clearedId]);
-                var defeat = enemy.Visuals.Defeat(enemy.Color, animationDepth, multipliers[clearedId]);
+                var defeat = enemy.Visuals.Defeat(enemy.Color, animationDepth, multipliers[clearedId], Model.ColorCount(enemy.Color) == 0);
                 if (match != null) deaths.Add(match);
                 if (defeat != null) deaths.Add(defeat);
                 views.Remove(clearedId);
                 enemy.Bind(null);
+                EnemyDestroyed?.Invoke(enemy.Color);
                 enemy.gameObject.SetActive(false);
                 if (Application.isPlaying) Destroy(enemy.gameObject);
                 else DestroyImmediate(enemy.gameObject);
@@ -364,7 +376,12 @@ namespace CandyCruisers
                 int scoreWeight = 0;
                 foreach (int clearedId in cleared) scoreWeight += multipliers[clearedId];
                 if (orangeBurst) OrangeBurstCleared?.Invoke(cleared.Count, Model.Count == 0, scoreWeight);
-                else MatchCleared?.Invoke(cleared.Count, Model.Count == 0, scoreWeight);
+                else
+                {
+                    MatchCleared?.Invoke(cleared.Count, Model.Count == 0, scoreWeight);
+                    // Score this contact first, then advance the combo before the next contact.
+                    foreach (var removedColor in removedColors) MatchColorScored?.Invoke(removedColor);
+                }
                 if (Model.Count == 0) FleetCleared?.Invoke();
             }
             return cleared.Count;

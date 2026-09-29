@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Serialization;
 
 namespace CandyCruisers
 {
@@ -6,6 +7,17 @@ namespace CandyCruisers
     public sealed class GameplayFraming : MonoBehaviour
     {
         private const int StarfieldCount = 10;
+        public const float WaveCrunchCompression = .12f;
+        private float waveCrunch;
+        public float WaveCrunchScale => 1 - WaveCrunchCompression * waveCrunch;
+
+        public void SetWaveCrunch(float amount)
+        {
+            waveCrunch = Mathf.Clamp01(amount);
+            Refresh();
+        }
+        [SerializeField, FormerlySerializedAs("solidWhiteBackground")] private bool solidBlackBackground = true;
+        public bool SolidBlackBackground { get => solidBlackBackground; set { solidBlackBackground = value; Refresh(); } }
         [SerializeField] private SpriteRenderer starBackground;
         [SerializeField, Min(0f)] private float backgroundDrift = 0.16f;
         [SerializeField, Min(0f)] private float backgroundCyclesPerSecond = 0.035f;
@@ -51,7 +63,12 @@ namespace CandyCruisers
         }
 
         private void OnEnable() => Refresh();
-        private void OnDisable() => BindSession(null);
+        private void OnDisable()
+        {
+            BindSession(null);
+            waveCrunch = 0;
+            if (view != null) view.ResetProjectionMatrix();
+        }
         private void OnDestroy()
         {
             BindSession(null);
@@ -85,7 +102,25 @@ namespace CandyCruisers
         {
             if (view == null) view = GetComponent<Camera>();
             view.orthographicSize = Mathf.Max(6f, 3.2f / Mathf.Max(0.01f, view.aspect));
+            // Compress every world-space visual together without moving actors or changing gameplay dimensions.
+            view.ResetProjectionMatrix();
+            if (waveCrunch > 0)
+            {
+                var projection = view.projectionMatrix;
+                projection.m00 *= WaveCrunchScale;
+                projection.m11 *= WaveCrunchScale;
+                view.projectionMatrix = projection;
+            }
+            if (solidBlackBackground)
+            {
+                view.clearFlags = CameraClearFlags.SolidColor;
+                view.backgroundColor = Color.black;
+                if (starBackground != null) starBackground.enabled = false;
+                if (crossFadeBackground != null) crossFadeBackground.enabled = false;
+                return;
+            }
             if (starBackground == null || starBackground.sprite == null) return;
+            starBackground.enabled = true;
             CaptureBackgroundHome();
             Vector2 size = starBackground.sprite.bounds.size;
             float scale = Mathf.Max(2f * view.orthographicSize * view.aspect / size.x,
@@ -95,6 +130,13 @@ namespace CandyCruisers
 
         public void TickBackground(float seconds)
         {
+            if (solidBlackBackground)
+            {
+                displayedLevel = CurrentLevel();
+                wavePulseRemaining = levelCrossFadeRemaining = 0;
+                Refresh();
+                return;
+            }
             if (starBackground == null) return;
             EnsureStarfields();
             CaptureBackgroundHome();
@@ -138,6 +180,7 @@ namespace CandyCruisers
 
         public void TriggerWaveSpawnEffect()
         {
+            if (solidBlackBackground) return;
             wavePulseRemaining = wavePulseSeconds;
         }
 

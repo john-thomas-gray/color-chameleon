@@ -21,31 +21,34 @@ namespace CandyCruisers.Editor
                     grid.Model.TryAdd(3, EnemyColor.Green, 2, 0);
                     var pulses = new List<int>();
                     movement.GreenPulsed += pulses.Add;
-                    movement.Tick(1);
-                    Check(root.transform.position.x == 0 && pulses.Count == 0, "Fleet holds still between ticks");
-                    for (int i = 0; i < frames; i++) movement.Tick(9.0 / frames);
-                    Check(Mathf.Abs(root.transform.position.x - .9f) < .0001f, "Stepped motion preserves average speed across frame sizes");
+                    float beat = FullSetCelebration.StepDuration;
+                    movement.Tick(beat * .5);
+                    Check(root.transform.position.x == 0 && pulses.Count == 0, "Fleet holds still between beats");
+                    for (int i = 0; i < frames; i++) movement.Tick(6.0 * beat / frames);
+                    float expectedTravel = movement.CurrentSpeed * beat * 6;
+                    Check(Mathf.Abs(root.transform.position.x - expectedTravel) < .0001f,
+                        $"Beat-locked motion preserves average speed across frame sizes: expected {expectedTravel}, got {root.transform.position.x}");
                     Check(pulses.SequenceEqual(new[] { 1, 2, 3, 1, 2, 3 }), "Every Green pulses once before any repeats");
                     grid.Model.Remove(1);
                     grid.Model.SetColor(2, EnemyColor.Blue);
-                    movement.Tick(5);
+                    movement.Tick(beat);
                     Check(pulses.Last() == 3 && pulses.Count == 7, "Dead and converted Greens leave the rotation");
-                    movement.Tick(2);
+                    movement.Tick(beat * .25);
                     movement.enabled = false;
                     movement.Tick(100);
                     Check(pulses.Count == 7, "Pause cannot accrue movement");
                     movement.enabled = true;
-                    movement.Tick(3);
-                    Check(pulses.Count == 8, "Resume preserves partial step progress");
-                    movement.Tick(4);
+                    movement.Tick(beat * .75);
+                    Check(pulses.Count == 8, "Resume preserves partial beat progress");
+                    movement.Tick(beat * .25);
                     movement.ResetSweep();
-                    movement.Tick(1);
+                    movement.Tick(beat * .5);
                     Check(root.transform.position.x == 0 && pulses.Count == 8, "New wave discards previous partial movement");
                     grid.Model.TryAdd(4, EnemyColor.Green, 0, 0);
-                    movement.Tick(4.5);
+                    movement.Tick(2 * beat);
                     Check(pulses.Skip(8).SequenceEqual(new[] { 4, 3 }), "New Greens join deterministic row order after reset");
                     Check(grid.Model.TryAdd(5, EnemyColor.Green, 3, 0), "New Green occupies an empty cell");
-                    movement.Tick(.15 / movement.CurrentSpeed);
+                    movement.Tick(beat);
                     Check(pulses.Last() == 5, "A joining Green gets a turn before an earlier Green repeats");
                 }
                 finally { UnityEngine.Object.DestroyImmediate(root); }
@@ -71,7 +74,7 @@ namespace CandyCruisers.Editor
                 visual.Clear();
                 Check(bolts.All(line => !line.enabled), "Disabling or recoloring cannot leave electricity behind");
             });
-            Debug.Log("Fleet tick checks passed: discrete steps, average speed, frame timing, Green rotation, removals, pause, reset and pulse visuals.");
+            Debug.Log("Fleet tick checks passed: beat-locked ticks, average speed, frame timing, Green rotation, removals, pause, reset and pulse visuals.");
         }
         public static void CapturePreview()
         {

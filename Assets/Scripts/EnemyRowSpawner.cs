@@ -22,6 +22,7 @@ namespace CandyCruisers
         public void ConfigureNewTypes(GameObject green, GameObject purple, GameObject yellow, GameObject orange = null)
         { greenPrefab = green; purplePrefab = purple; yellowPrefab = yellow; orangePrefab = orange; }
         public void ConfigureOrange(GameObject orange) => orangePrefab = orange;
+        public Sprite SpecialSprite => specialSprite != null ? specialSprite : EnemyPlaceholderArt.Triangle;
         public GameObject Prefab(EnemyColor color) => color == EnemyColor.Blue ? bluePrefab :
             color == EnemyColor.Red ? redPrefab : color == EnemyColor.Green ? greenPrefab :
             color == EnemyColor.Purple ? purplePrefab : color == EnemyColor.Orange ? orangePrefab : yellowPrefab;
@@ -32,7 +33,7 @@ namespace CandyCruisers
             var prefab = Prefab(enemy.Color);
             if (prefab == null) return;
             var ordinary = prefab.GetComponentInChildren<SpriteRenderer>().sprite;
-            var sprite = enemy.IsSpecial ? (specialSprite != null ? specialSprite : EnemyPlaceholderArt.Triangle) : ordinary;
+            var sprite = enemy.IsSpecial ? SpecialSprite : ordinary;
             enemy.Visuals.Body.sprite = sprite;
             enemy.Visuals.Root.localScale = Vector3.one * (ordinary.bounds.size.x / sprite.bounds.size.x);
         }
@@ -84,7 +85,8 @@ namespace CandyCruisers
             bool orange = colors.Remove(EnemyColor.Orange) && Random.Range(0, OrangeSpawnOdds) == 0;
             if (!orange && colors.Count == 0) return null;
             var summoned = Spawn(orange ? EnemyColor.Orange : colors[Random.Range(0, colors.Count)], cell.x, cell.y,
-                source.Color == EnemyColor.Purple && source.IsSpecial ? EnemyColor.Purple : (EnemyColor?)null);
+                source.Color == EnemyColor.Purple && source.IsSpecial ? EnemyColor.Purple : (EnemyColor?)null, true);
+            if (summoned != null) GetComponent<SoundEffects>()?.PlayCue(SoundEffect.PurpleWarp);
             session?.CheckPlayerContact();
             return summoned;
         }
@@ -249,6 +251,7 @@ namespace CandyCruisers
                 System.Array.Copy(plan, start, row, 0, rowWidth);
                 SpawnPlannedRow(row, start / rowWidth);
             }
+            GetComponent<SoundEffects>()?.PlayCue(SoundEffect.WaveSpawn);
             return true;
         }
 
@@ -295,7 +298,7 @@ namespace CandyCruisers
             }
         }
 
-        private GridEnemy Spawn(EnemyColor color, int column, int row, EnemyColor? effectColor = null)
+        private GridEnemy Spawn(EnemyColor color, int column, int row, EnemyColor? effectColor = null, bool warp = false)
         {
                 if (!CanSpawn(color, column, row)) return null;
                 // Configure while inactive and outside the grid, before OnEnable can register it.
@@ -309,7 +312,7 @@ namespace CandyCruisers
                 instance.transform.localPosition = grid.CellPosition(column, row);
                 instance.SetActive(true);
                 grid.Register(enemy);
-                instance.GetComponent<EnemyAbilities>()?.BeginSpawnEffect(effectColor);
+                instance.GetComponent<EnemyAbilities>()?.BeginSpawnEffect(effectColor, warp);
                 return enemy;
         }
     }

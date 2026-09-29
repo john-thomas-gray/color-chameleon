@@ -9,6 +9,12 @@ namespace CandyCruisers.Editor
     {
         public static void Run()
         {
+            var numberFont = Resources.Load<Font>("Fonts/Bungee-Regular");
+            Check(numberFont != null, "Bungee is bundled with the game");
+            numberFont.RequestCharactersInTexture("0123456789", 64, FontStyle.Normal);
+            foreach (char digit in "0123456789")
+                Check(numberFont.GetCharacterInfo(digit, out var glyph, 64, FontStyle.Normal) && glyph.advance > 0,
+                    "Bungee includes a renderable glyph for " + digit);
             foreach (float step in new[] { .016f, .1f, 2f })
             foreach (bool fullClear in new[] { false, true })
             SpecialEnemyChecks.Fixture((grid, player, tongue) =>
@@ -57,6 +63,18 @@ namespace CandyCruisers.Editor
                 try { Check(effect.Multiplier == 1 && effect.GetComponentInChildren<TextMesh>(true).text == "",
                     "Ordinary first kills also hide 1 without losing its scoring value"); }
                 finally { UnityEngine.Object.DestroyImmediate(effect.gameObject); }
+                foreach (int multiplier in new[] { 2, 8, 24, 128 })
+                {
+                    effect = EnemyDeathBurst.Create(source, EnemyColor.Green, 1, multiplier);
+                    try
+                    {
+                        var label = effect.GetComponentInChildren<TextMesh>(true);
+                        Check(label.text == multiplier.ToString() && label.font == numberFont &&
+                            label.fontStyle == FontStyle.Normal && label.GetComponent<MeshRenderer>().sharedMaterial == numberFont.material,
+                            "Single- and multi-digit destruction labels use Bungee with its original weight and material");
+                    }
+                    finally { UnityEngine.Object.DestroyImmediate(effect.gameObject); }
+                }
             });
             foreach (bool magic in new[] { false, true })
             foreach (int size in new[] { 1, 2 })

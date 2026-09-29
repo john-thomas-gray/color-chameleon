@@ -10,10 +10,17 @@ namespace CandyCruisers.Editor
         public static void Run()
         {
             foreach (EnemyColor color in Enum.GetValues(typeof(EnemyColor)))
+            foreach (bool special in new[] { false, true })
             {
-                var first = CombatBalance.CooldownRange(color, 1);
-                var second = CombatBalance.CooldownRange(color, 2);
-                var final = CombatBalance.CooldownRange(color, 10000);
+                var first = CombatBalance.CooldownRange(color, 1, special);
+                var second = CombatBalance.CooldownRange(color, 2, special);
+                var final = CombatBalance.CooldownRange(color, 10000, special);
+                var unchanged = color == EnemyColor.Red || color == EnemyColor.Blue ? new Vector2(2.25f, 7.5f) :
+                    color == EnemyColor.Green || color == EnemyColor.Purple ? new Vector2(6, 9) : new Vector2(1.5f, 4.5f);
+                Check(first == unchanged, "Both basic and special cooldowns retain their existing starting values: " + color);
+                foreach (int level in new[] { 1, 2, 6, 19, 10000 })
+                    Check(CombatBalance.CooldownRange(color, level, special) == CombatBalance.CooldownRange(color, level),
+                        "Tier-specific cooldown tuning currently preserves identical values at every level");
                 Check(first.x > 0 && first.y >= first.x + 3, "Cooldowns stay positive with room for variance");
                 Check(second.x == first.x && second.y <= first.y && Mathf.Abs(second.y - Mathf.Max(first.x + 3, first.y - .25f)) < .001f,
                     "Only cooldown maximum decreases gently, stopping at the variance floor");
@@ -24,26 +31,35 @@ namespace CandyCruisers.Editor
 
             var image = new Texture2D(2, 2);
             image.LoadImage(File.ReadAllBytes("Assets/Art/ShieldArc.png"));
-            Check(image.GetPixel(64, 2).a > .5f && image.GetPixel(64, 126).a == 0 && image.GetPixel(64, 64).a == 0,
-                "Shield art is a hollow player-facing lower arc");
-            int left = image.width, right = -1;
+            Check(image.GetPixel(64, 2).a > .5f && image.GetPixel(64, 126).a > .5f &&
+                image.GetPixel(2, 64).a > .5f && image.GetPixel(126, 64).a > .5f &&
+                image.GetPixel(64, 64).a == 0,
+                "Shield art is a hollow ring fully encircling the enemy");
+            int left = image.width, right = -1, bottom = image.height, top = -1;
             for (int y = 0; y < image.height; y++)
             for (int x = 0; x < image.width; x++)
             {
                 if (image.GetPixel(x, y).a <= .01f) continue;
                 left = Mathf.Min(left, x);
                 right = Mathf.Max(right, x);
+                bottom = Mathf.Min(bottom, y);
+                top = Mathf.Max(top, y);
                 float radius = Vector2.Distance(new Vector2(x + .5f, y + .5f), new Vector2(64, 64));
-                Check(radius > 58 && radius < 63, "Shorter arc preserves its original inner and outer radii");
+                Check(radius > 35 && radius < 64, "Shield thickens inward without extending its outer radius");
             }
-            Check(Mathf.Abs((right - left + 1) * 1.25f / 128 - 1) < .025f,
-                "Shield endpoint span matches the enemy diameter within raster edge tolerance");
+            Check(image.GetPixel(64, 4).a > .99f && image.GetPixel(64, 14).a > .5f &&
+                image.GetPixel(64, 24).a > 0 && image.GetPixel(64, 24).a < .15f && image.GetPixel(64, 30).a == 0 &&
+                image.GetPixel(64, 124).a > .99f && image.GetPixel(14, 64).a > .5f &&
+                image.GetPixel(24, 64).a > 0 && image.GetPixel(24, 64).a < .15f && image.GetPixel(30, 64).a == 0,
+                "Solid outer rim fades through the enemy silhouette to a fully transparent inner edge");
+            Check(left <= 2 && right >= 125 && bottom <= 2 && top >= 125,
+                "Shield ring spans every cardinal side of the sprite frame");
             UnityEngine.Object.DestroyImmediate(image);
             var shield = AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Art/ShieldArc.png");
             Check(shield.rect.size == new Vector2(128, 128) && shield.pivot == new Vector2(64, 64),
                 "Shield import retains the full circular frame and centered pivot");
             foreach (float step in new[] { .016f, .1f, 2f }) Magic(step);
-            Debug.Log("Combat checks passed: shield arc, cooldown ranges and limits, level speed, magic awards, piercing, shields, charge cap and resets.");
+            Debug.Log("Combat checks passed: shield ring, separate basic/special cooldown ranges with unchanged values and scaling, level speed, magic awards, piercing, shields, charge cap and resets.");
         }
 
         private static void Magic(float step)

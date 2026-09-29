@@ -1,11 +1,12 @@
 using System;
+using System.Collections.Generic;
 
 namespace CandyCruisers
 {
     public sealed class RunProgress
     {
         public const int MinLevel = 1;
-        public const int MaxMenuStartLevel = 19;
+        public const int MaxMenuStartLevel = 99;
         public int Level { get; private set; } = 1;
         public int Defeated { get; private set; }
         public long Score { get; private set; }
@@ -13,6 +14,7 @@ namespace CandyCruisers
         public int ComboMultiplier => Math.Max(1, ComboStreak + 1);
         public int ActiveComboMultiplier { get; private set; } = 1;
         private bool shotActive;
+        private readonly HashSet<EnemyColor> shotColors = new HashSet<EnemyColor>();
         public int ScoringComboMultiplier => shotActive ? ActiveComboMultiplier : 1;
         public int NextThreshold => 9 * Level * (Level + 1);
         public int PreviousThreshold => 9 * (Level - 1) * Level;
@@ -24,7 +26,7 @@ namespace CandyCruisers
         public int BatchEnemies => BatchRows * RowWidth;
         public static int RowWidthForLevel(int level) => level >= WideRowsStartLevel ? WideRowWidth : StandardRowWidth;
         public static int UnlockLevel(EnemyColor color) =>
-            color == EnemyColor.Green ? 2 : color == EnemyColor.Purple ? 4 : color == EnemyColor.Yellow ? 6 : color == EnemyColor.Orange ? 9 : 1;
+            color == EnemyColor.Green ? 2 : color == EnemyColor.Yellow ? 4 : color == EnemyColor.Purple ? 6 : color == EnemyColor.Orange ? 9 : 1;
         public static bool IsUnlocked(EnemyColor color, int level) => level >= UnlockLevel(color);
         public static int ClampMenuStartLevel(int level) => Math.Max(MinLevel, Math.Min(MaxMenuStartLevel, level));
 
@@ -49,15 +51,24 @@ namespace CandyCruisers
 
         public void BeginShot()
         {
+            shotColors.Clear();
             ActiveComboMultiplier = ComboMultiplier;
             shotActive = true;
         }
 
+        public bool RegisterShotColor(EnemyColor color)
+        {
+            if (!shotActive || !shotColors.Add(color)) return false;
+            ComboStreak++;
+            ActiveComboMultiplier = ComboMultiplier;
+            return true;
+        }
+
         public void FinishShot(bool hit)
         {
-            if (hit) ComboStreak++;
-            else ResetCombo();
+            if (!hit) ResetCombo();
             shotActive = false;
+            shotColors.Clear();
             ActiveComboMultiplier = ComboMultiplier;
         }
 
@@ -66,6 +77,7 @@ namespace CandyCruisers
             ComboStreak = 0;
             ActiveComboMultiplier = 1;
             shotActive = false;
+            shotColors.Clear();
         }
     }
 }

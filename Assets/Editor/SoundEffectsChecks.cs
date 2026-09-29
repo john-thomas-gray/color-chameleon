@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using UnityEditor;
 using UnityEngine;
 
@@ -6,6 +7,16 @@ namespace CandyCruisers.Editor
 {
     public static class SoundEffectsChecks
     {
+        public static void ReimportSoundtrackAndCheckGameplay()
+        {
+            foreach (string name in new[] { "AnotherJoe.wav", "PotentialForAnything.wav" })
+            {
+                string path = "Assets/Resources/" + name;
+                if (File.Exists(path))
+                    AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
+            }
+            GameplayChecks.Run();
+        }
         [MenuItem("Candy Cruisers/Run Sound Checks")]
         public static void Run()
         {
@@ -14,7 +25,10 @@ namespace CandyCruisers.Editor
             foreach (bool magic in new[] { false, true }) CheckEarlyReturn(magic);
             CheckShieldReturn();
             CheckSlowReturn();
-            Debug.Log("Sound effects checks passed: oscillator continuity, animation-driven pitch, early and slow returns, cancellation, volume, mute and pause.");
+            CheckSeamlessMenuMusic();
+            CheckGameplayMusic();
+            MusicLoudnessChecks.Run();
+            Debug.Log("Sound effects checks passed: oscillator continuity, animation-driven pitch, early and slow returns, cancellation, music, volume, mute and pause.");
         }
 
         private static void CheckClips()
@@ -165,8 +179,8 @@ namespace CandyCruisers.Editor
                 float hitLength = tongue.Length;
                 Check(hitPitch < 1.2f, "An early hit does not jump to a full-reach return pitch");
                 tongue.Tick(.01f, grid);
-                Check(voice.pitch < hitPitch && tongue.Length < hitLength,
-                    "An early return immediately lowers pitch with the animation");
+                Check(voice.pitch <= hitPitch && tongue.Length < hitLength,
+                    "An early return holds or lowers its scale note as the tongue retracts");
                 tongue.Cancel();
                 tongue.TryFire(EnemyColor.Red, 10, magic);
                 tongue.Tick(.01f, grid);
@@ -220,13 +234,208 @@ namespace CandyCruisers.Editor
                 {
                     float before = voice.pitch;
                     tongue.Tick(.25f, grid);
-                    Check(tongue.Active && voice.loop && voice.clip == tone && voice.pitch < before,
+                    Check(tongue.Active && voice.loop && voice.clip == tone && voice.pitch <= before,
                         "Whistle sustains and keeps falling throughout a multi-second deflection");
                 }
                 tongue.Tick(100, grid);
                 Check(!tongue.Active && voice.clip == null, "Slow return stops its tone only on completion");
             });
         }
+
+        private static void CheckSeamlessMenuMusic()
+        {
+            // Keep synchronous checks independent of background streaming; the runtime scene checks use the real recording.
+            var menuClip = AudioClip.Create(GameplayMusicPlayer.MenuResourceName, ArcadeSoundClips.SampleRate * 15,
+                1, ArcadeSoundClips.SampleRate, false);
+            try
+            {
+                SpecialEnemyChecks.Fixture((grid, player, tongue) =>
+                {
+                    var session = grid.gameObject.AddComponent<GameSession>();
+                    session.Configure(player);
+                    if (!Application.isPlaying) typeof(GameSession).GetMethod("OnEnable",
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(session, null);
+                    var music = grid.GetComponent<GameplayMusicPlayer>();
+                    var settings = new SerializedObject(music);
+                    settings.FindProperty("menuTrack").objectReferenceValue = menuClip;
+                    settings.FindProperty("volume").floatValue = .23f;
+                    settings.FindProperty("muted").boolValue = true;
+                    settings.ApplyModifiedPropertiesWithoutUndo();
+                    typeof(GameSession).GetMethod("Start", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                        .Invoke(session, null);
+                    music.UpdatePlayback();
+                    var source = music.Source;
+                    var menu = source.clip;
+                    source.timeSamples = menu.frequency * 12;
+                    int position = source.timeSamples;
+                    float beat = music.BeatPosition;
+                    Check(menu == music.MenuTrack && music.CurrentTempo == 140 && music.CurrentBeatOffset == .1f &&
+                        music.CurrentRelativeMajorTonic == 2, "Menu beat timing and key belong to the audible Another Joe recording");
+                    session.StartRun();
+                    Check(music.Source == source && source.clip == menu && music.Track == menu && !source.loop &&
+                        source.timeSamples >= position && source.timeSamples - position < menu.frequency / 10,
+                        "Starting gameplay keeps the same audio source, song and sample position without restarting");
+                    Check(music.BeatPosition >= beat && music.BeatPosition - beat < .25f && music.CurrentTempo == 140 &&
+                        music.CurrentRelativeMajorTonic == 2 && Mathf.Abs(source.volume - .23f * MusicLoudness.GainFor(menu)) < .0001f && source.mute,
+                        "The menu-to-gameplay transition preserves beat phase, key, volume and mute");
+                    if (Application.isPlaying) Check(source.isPlaying, "The continuing menu song remains playing in the real audio engine");
+                    music.UpdatePlayback();
+                    Check(source.clip == menu && source.timeSamples >= position, "Later playback updates do not replace the carried song");
+                    session.Pause();
+                    int pausedPosition = source.timeSamples;
+                    session.Resume();
+                    Check(source.clip == menu && source.timeSamples >= pausedPosition && source.timeSamples - pausedPosition < menu.frequency / 10,
+                        "Pause/resume preserves the carried song's position");
+                    if (HasBundledSoundtrack())
+                    {
+                        var songs = new System.Collections.Generic.HashSet<string> { menu.name };
+                        for (int i = 1; i < music.TrackCount; i++)
+                            Check(music.SkipCurrentSong() && songs.Add(music.Source.clip.name),
+                                "The carried menu song counts as the first entry of the gameplay shuffle bag");
+                        var last = music.Source.clip;
+                        Check(songs.Count == music.TrackCount && music.SkipCurrentSong() && music.Source.clip != last,
+                            "Normal shuffle continues without immediate repeats after the carried song");
+                    }
+                    else Check(!music.SkipCurrentSong(), "Local-only soundtrack skips are unavailable when no local music is installed");
+                });
+            }
+            finally { UnityEngine.Object.DestroyImmediate(menuClip); }
+            Debug.Log("Seamless menu music checks passed: same source, clip, sample position, beat phase, key, volume, mute, pause and shuffle continuation.");
+        }
+
+        private static void CheckGameplayMusic()
+        {
+            SpecialEnemyChecks.Fixture((grid, player, tongue) =>
+            {
+                var session = grid.gameObject.AddComponent<GameSession>();
+                var clip = AudioClip.Create("Gameplay music replacement", 4410, 1, ArcadeSoundClips.SampleRate, false);
+                var menuClip = AudioClip.Create(GameplayMusicPlayer.MenuResourceName, ArcadeSoundClips.SampleRate * 15,
+                    1, ArcadeSoundClips.SampleRate, false);
+                try
+                {
+                    session.Configure(player);
+                    if (!Application.isPlaying) typeof(GameSession).GetMethod("OnEnable",
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(session, null);
+                    typeof(GameSession).GetMethod("Start", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                        .Invoke(session, null);
+                    var music = grid.GetComponent<GameplayMusicPlayer>();
+                    Check(music != null, "Game session creates a gameplay music player");
+                    if (HasBundledSoundtrack())
+                    {
+                        var songs = new System.Collections.Generic.HashSet<string>();
+                        for (int i = 0; i < music.TrackCount; i++)
+                        {
+                            var selected = music.Track;
+                            Check(selected != null && selected.length > 30 && selected.loadState != AudioDataLoadState.Failed,
+                                "Each local soundtrack resource imports as playable audio");
+                            songs.Add(selected.name);
+                            music.Source.clip = selected;
+                            Check(music.CurrentTempo > 60 && music.CurrentTempo < 200, "Each playing track has independent measured beat metadata");
+                            if (i + 1 < music.TrackCount) music.SelectNextTrack();
+                        }
+                        Check(songs.Count == 4 && songs.Contains("AnotherJoe") && songs.Contains("PotentialForAnything") &&
+                            songs.Contains("DiscoDescent") && songs.Contains("GameplayMusic") &&
+                            !songs.Contains("We Are Not Anonymous") &&
+                            !songs.Contains("PoisonWasTheCure") && !songs.Contains("DriveSlow"),
+                            "Shuffle includes the updated four-song local set exactly once per bag");
+                        var last = music.Track;
+                        music.SelectNextTrack();
+                        Check(music.Track != last, "Shuffle bag boundary avoids immediate repeats");
+                        Check(music.MenuTrack != null && music.ContainsTrack(music.MenuTrack.name),
+                            "Main menu selects one local soundtrack song");
+                    }
+                    else Check(music.Track == null && music.MenuTrack == null,
+                        "Main stays music-free when no local soundtrack files are installed");
+                    Check(!music.SkipCurrentSong(), "Developer skip does not replace menu music outside gameplay");
+                    var serialized = new SerializedObject(music);
+                    serialized.FindProperty("track").objectReferenceValue = clip;
+                    serialized.FindProperty("menuTrack").objectReferenceValue = menuClip;
+                    serialized.ApplyModifiedPropertiesWithoutUndo();
+                    music.UpdatePlayback();
+                    Check(!music.InGameplayRun && music.ShouldPlayMusic && music.Source.clip == music.MenuTrack &&
+                        music.MenuTrack != clip, "Main menu requests its selected soundtrack song, not the gameplay override");
+                    session.StartRun();
+                    Check(session.State == GameSession.RunState.Refilling && music.InGameplayRun && music.ShouldPlayMusic,
+                        "Starting a run requests gameplay music during the opening beat");
+                    Check(music.Source.clip == music.MenuTrack && !music.Source.loop,
+                        "Even an assigned gameplay override waits for the current menu song to finish");
+                    if (Application.isPlaying)
+                    {
+                        music.Source.Stop();
+                        music.UpdatePlayback(); music.UpdatePlayback();
+                    }
+                    else { music.SelectNextTrack(); music.UpdatePlayback(); }
+                    Check(music.Source.clip == clip && music.Source.loop && !music.Source.playOnAwake &&
+                        music.Source.spatialBlend == 0 && music.Source.dopplerLevel == 0,
+                        "After the menu song ends, gameplay music uses the assigned nonspatial loop");
+                    music.Source.timeSamples = 2205;
+                    Check(Mathf.Abs(music.BeatPosition - ((.05f - .08f) / music.BeatDuration)) < .002f,
+                        "Beat phase follows the audio sample clock, not frame time");
+                    Check(Mathf.Abs(music.Source.volume - GameplayMusicPlayer.DefaultVolume) < .0001f &&
+                        music.Source.volume < .35f, "Gameplay music defaults below sound-effect loudness");
+                    session.Pause();
+                    Check(music.InGameplayRun && !music.ShouldPlayMusic, "Pause keeps the run context but pauses music");
+                    session.Resume();
+                    Check(music.ShouldPlayMusic, "Resume requests music again");
+                    serialized.Update();
+                    serialized.FindProperty("track").objectReferenceValue = null;
+                    serialized.ApplyModifiedPropertiesWithoutUndo();
+                    music.UpdatePlayback();
+                    if (HasBundledSoundtrack())
+                    {
+                        Check(music.ContainsTrack(music.Source.clip.name) && !music.Source.loop,
+                            "Gameplay soundtrack advances instead of looping one song");
+                        var beforeSkip = music.Track;
+                        Check(music.SkipCurrentSong() && music.Track != beforeSkip && music.Source.clip == music.Track,
+                            "Developer skip immediately selects the next gameplay song and its beat metadata");
+                        session.Pause();
+                        beforeSkip = music.Track;
+                        Check(music.SkipCurrentSong() && music.Track != beforeSkip && session.IsPaused && !music.ShouldPlayMusic,
+                            "Skipping while paused preserves the paused state");
+                        session.Resume();
+                    }
+                    else
+                    {
+                        Check(!music.SkipCurrentSong(), "Developer skip stays unavailable without local soundtrack resources");
+                        session.Pause(); session.Resume();
+                    }
+                    if (HasBundledSoundtrack() && Application.isPlaying && music.Source.clip.loadState == AudioDataLoadState.Loaded)
+                    {
+                        music.UpdatePlayback();
+                        var finished = music.Source.clip;
+                        music.Source.Stop();
+                        music.UpdatePlayback(); music.UpdatePlayback();
+                        Check(music.Source.clip != finished && music.Source.clip == music.Track,
+                            "A finished gameplay song automatically selects and loads the next song");
+                        var resumed = music.Track;
+                        session.Pause(); session.Resume();
+                        Check(music.Track == resumed, "Pause/resume does not advance the playlist");
+                    }
+                    typeof(GameSession).GetMethod("EndGame", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                        .Invoke(session, null);
+                    Check(!music.InGameplayRun && !music.ShouldPlayMusic && music.Source.volume == 0 && !music.Source.isPlaying,
+                        "Game over immediately stops the music, including direct transitions without a death cue");
+                    session.Tick(2);
+                    music.UpdatePlayback();
+                    Check(!music.ShouldPlayMusic && music.Source.volume == 0 && !music.Source.isPlaying && !music.SkipCurrentSong(),
+                        "Game-over updates and developer skip cannot restart the soundtrack");
+                }
+                finally
+                {
+                    if (!Application.isPlaying) typeof(GameSession).GetMethod("OnDisable",
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(session, null);
+                    UnityEngine.Object.DestroyImmediate(session);
+                    UnityEngine.Object.DestroyImmediate(clip);
+                    UnityEngine.Object.DestroyImmediate(menuClip);
+                }
+            });
+        }
+
+        private static bool HasBundledSoundtrack() =>
+            Resources.Load<AudioClip>("AnotherJoe") != null &&
+            Resources.Load<AudioClip>("PotentialForAnything") != null &&
+            Resources.Load<AudioClip>("DiscoDescent") != null &&
+            Resources.Load<AudioClip>("GameplayMusic") != null;
 
         private static void Check(bool value, string message)
         { if (!value) throw new Exception("Sound effects check failed: " + message); }

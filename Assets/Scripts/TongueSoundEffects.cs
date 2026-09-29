@@ -46,17 +46,24 @@ namespace CandyCruisers
         {
             if (sounds == null) return;
             sounds.SetGain(voice, 0);
-            sounds.Play(SoundEffect.TongueWhistle, voice, baseFrequency / ArcadeSoundClips.TongueFrequency, true);
+            sounds.Play(SoundEffect.TongueWhistle, voice, MusicalPitch(0), true);
             FollowMotion();
         }
         private void FollowMotion()
         {
             if (sounds == null || voice == null || voice.clip == null || !tongue.Active || sounds.Paused) return;
-            // Use physical length, not a phase timer or the hit-shortened reach, so
-            // pitch is continuous across collisions and follows slow deflections.
-            float frequency = baseFrequency * Mathf.Pow(2, tongue.Length / octaveLength);
-            voice.pitch = Mathf.Clamp(frequency / ArcadeSoundClips.TongueFrequency, .5f, 3);
+            // Follow physical length through scale notes, including slow deflections and early returns.
+            voice.pitch = MusicalPitch(tongue.Length);
             sounds.SetGain(voice, Mathf.SmoothStep(0, 1, tongue.Length / fadeLength));
+        }
+        private float MusicalPitch(float length)
+        {
+            float register = sounds.CurrentTonic > 6 ? 2 : 1;
+            float frequency = ArcadeSoundClips.KeyFrequency(baseFrequency * register * Mathf.Pow(2, length / octaveLength), sounds.CurrentTonic);
+            float pitch = frequency / ArcadeSoundClips.TongueFrequency;
+            while (pitch < .5f) pitch *= 2;
+            while (pitch > 3) pitch /= 2;
+            return pitch;
         }
         private void Stop()
         {

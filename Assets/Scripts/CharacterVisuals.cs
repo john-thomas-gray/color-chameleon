@@ -23,6 +23,34 @@ namespace CandyCruisers
         public UnityEvent AnimationFinished = new UnityEvent();
         public SpriteRenderer Body => body;
         public Transform Root => visualRoot;
+        private Transform beatRoot;
+        private GameplayMusicPlayer music;
+        private PlayerMovement player;
+        public float BeatScale => beatRoot != null ? beatRoot.localScale.x : 1;
+
+        private void LateUpdate()
+        {
+            if (player == null) player = GetComponent<PlayerMovement>();
+            if (music == null) music = player != null ? player.Music : GetComponentInParent<GameplayMusicPlayer>();
+            if (music != null && music.InGameplayRun) RefreshBeat(music.BeatPosition, player != null);
+            else ResetBeat();
+        }
+
+        public void RefreshBeat(float beatPosition, bool offbeat)
+        {
+            if (visualRoot == null || visualRoot == transform) return;
+            if (beatRoot == null)
+            {
+                // A separate pivot keeps the beat independent of spawn growth, disguises and hitboxes.
+                beatRoot = new GameObject("Beat pulse").transform;
+                beatRoot.SetParent(visualRoot.parent, false);
+                visualRoot.SetParent(beatRoot, false);
+            }
+            beatRoot.localScale = Vector3.one * (1 + .09f * GameplayMusicPlayer.BeatPulse(beatPosition, offbeat));
+        }
+
+        private void ResetBeat() { if (beatRoot != null) beatRoot.localScale = Vector3.one; }
+        private void OnDisable() => ResetBeat();
         public Bounds HitBounds
         {
             get
@@ -58,8 +86,8 @@ namespace CandyCruisers
 
         public void CopyVisualScale(CharacterVisuals other)
         {
-            var size = other.Root.lossyScale;
-            var parent = Root.parent != null ? Root.parent.lossyScale : Vector3.one;
+            var size = other.Root.lossyScale / other.BeatScale;
+            var parent = Root.parent != null ? Root.parent.lossyScale / BeatScale : Vector3.one;
             Root.localScale = new Vector3(size.x / parent.x, size.y / parent.y, size.z / parent.z);
         }
 
@@ -73,20 +101,20 @@ namespace CandyCruisers
             Trigger(matchTrigger); Matched.Invoke();
             return Spawn(matchPrefab, PresentationCue.Kind.Match, color, depth, multiplier);
         }
-        public PresentationCue Defeat(EnemyColor color, int depth, int? multiplier = null)
+        public PresentationCue Defeat(EnemyColor color, int depth, int? multiplier = null, bool colorClear = false)
         {
             Trigger(defeatTrigger); Defeated.Invoke();
-            return Spawn(defeatPrefab, PresentationCue.Kind.Defeat, color, depth, multiplier);
+            return Spawn(defeatPrefab, PresentationCue.Kind.Defeat, color, depth, multiplier, colorClear);
         }
         public PresentationCue PlayerDefeat(EnemyColor color)
         {
             Trigger(defeatTrigger); Defeated.Invoke();
             return Spawn(defeatPrefab, PresentationCue.Kind.PlayerDefeat, color, 1);
         }
-        private PresentationCue Spawn(PresentationCue prefab, PresentationCue.Kind kind, EnemyColor color, int depth, int? multiplier = null)
+        private PresentationCue Spawn(PresentationCue prefab, PresentationCue.Kind kind, EnemyColor color, int depth, int? multiplier = null, bool colorClear = false)
         {
             if (body == null || !Application.isPlaying) return null;
-            return PresentationCue.Spawn(prefab, kind, body, color, depth, multiplier);
+            return PresentationCue.Spawn(prefab, kind, body, color, depth, multiplier, colorClear);
         }
         private void Trigger(string trigger)
         {

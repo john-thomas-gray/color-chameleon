@@ -18,6 +18,10 @@ namespace CandyCruisers
         private bool initialized;
         private EnemyGrid grid;
         private int resetVersion;
+        private double beatPosition;
+        private bool beatClockInitialized;
+        private bool beatClockUsesMusic;
+        private int lastMovementBeat = int.MinValue;
         public int Direction { get; private set; } = 1;
         public float CurrentSpeed => speed * CombatBalance.FleetSpeedMultiplier(GetComponent<GameSession>()?.Progress.Level ?? 1)
             * (useGreenDashes ? 1 : .1f * GetComponent<EnemyGrid>().Model.ColorCount(EnemyColor.Green));
@@ -37,6 +41,10 @@ namespace CandyCruisers
             Initialize();
             Direction = 1;
             bankedDistance = 0;
+            beatPosition = 0;
+            beatClockInitialized = false;
+            beatClockUsesMusic = false;
+            lastMovementBeat = int.MinValue;
             greenOrder.Clear();
             pulsedGreens.Clear();
             transform.localPosition = origin;
@@ -49,6 +57,12 @@ namespace CandyCruisers
         {
             Initialize();
             if (!enabled || speed <= 0 || seconds <= 0 || double.IsNaN(seconds) || double.IsInfinity(seconds)) return;
+            if (!useGreenDashes) { TickGreenBeatMovement(seconds); return; }
+            TickLegacyMovement(seconds);
+        }
+
+        private void TickLegacyMovement(double seconds)
+        {
             int version = resetVersion;
             // Integrate the existing speed, spending distance only on discrete steps.
             while (seconds > 0 && enabled && version == resetVersion)
@@ -70,6 +84,72 @@ namespace CandyCruisers
                 if (step > 0) PulseNextGreen();
                 AdvanceDistance(step);
             }
+        }
+
+        private void TickGreenBeatMovement(double seconds)
+        {
+            float beatDuration = CurrentBeatDuration;
+            double current = AdvanceBeatClock(seconds, beatDuration, out double previous);
+            if (current < previous)
+            {
+                beatPosition = current;
+                lastMovementBeat = (int)System.Math.Floor(current);
+                return;
+            }
+            if (lastMovementBeat == int.MinValue) lastMovementBeat = (int)System.Math.Floor(previous);
+            int version = resetVersion;
+            int currentBeat = (int)System.Math.Floor(current + .000001);
+            while (lastMovementBeat < currentBeat && enabled && version == resetVersion)
+            {
+                lastMovementBeat++;
+                float currentSpeed = CurrentSpeed;
+                if (currentSpeed <= 0 || !grid.OccupiedHorizontalBounds(out float left, out float right) ||
+                    right - left >= 2f * PlayerMovement.HalfWidth)
+                {
+                    if (grid.Model.ColorCount(EnemyColor.Green) == 0 || grid.Model.Count == 0)
+                    {
+                        greenOrder.Clear();
+                        pulsedGreens.Clear();
+                    }
+                    continue;
+                }
+                PulseNextGreen();
+                var music = GetComponent<GameplayMusicPlayer>();
+                float elapsedBeat = beatClockUsesMusic && music != null ? music.CompletedBeatDuration(lastMovementBeat) : beatDuration;
+                AdvanceDistance(currentSpeed * elapsedBeat);
+            }
+        }
+
+        private float CurrentBeatDuration
+        {
+            get
+            {
+                var music = GetComponent<GameplayMusicPlayer>();
+                return music != null ? music.BeatDuration : FullSetCelebration.StepDuration;
+            }
+        }
+
+        private double AdvanceBeatClock(double seconds, float beatDuration, out double previous)
+        {
+            var music = GetComponent<GameplayMusicPlayer>();
+            if (Application.isPlaying && music != null && music.Source != null && music.Source.isPlaying)
+            {
+                double current = music.BeatPosition;
+                previous = beatClockInitialized && beatClockUsesMusic ? beatPosition : current;
+                beatPosition = current;
+                beatClockInitialized = true;
+                beatClockUsesMusic = true;
+                return current;
+            }
+            if (!beatClockInitialized || beatClockUsesMusic)
+            {
+                beatPosition = 0;
+                beatClockInitialized = true;
+                beatClockUsesMusic = false;
+            }
+            previous = beatPosition;
+            beatPosition += seconds / Mathf.Max(.0001f, beatDuration);
+            return beatPosition;
         }
 
         private void PulseNextGreen()

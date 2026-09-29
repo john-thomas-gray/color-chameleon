@@ -11,6 +11,7 @@ GameObject:
   - component: {fileID: 6420874679129599457}
   - component: {fileID: 7723095385810922358}
   - component: {fileID: 2888318949038489793}
+  - component: {fileID: 5658927384019721663}
   m_Layer: 0
   m_Name: Red Missile
   m_TagString: Untagged
@@ -28,7 +29,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 0.14, y: 0.32, z: 1}
+  m_LocalScale: {x: 0.5, y: 0.42, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
@@ -82,10 +83,10 @@ SpriteRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 25
   m_MaskInteraction: 0
-  m_Sprite: {fileID: 3536530938591342608, guid: 3e09edac4b0cb4a06b1adf339f23f4a0, type: 3}
-  m_Color: {r: 1, g: 0.48, b: 0.28, a: 1}
+  m_Sprite: {fileID: 21300000, guid: 3eb22c8a539065a5e9c13c31cd031954, type: 3}
+  m_Color: {r: 1, g: 0.12, b: 0.08, a: 1}
   m_FlipX: 0
-  m_FlipY: 0
+  m_FlipY: 1
   m_DrawMode: 0
   m_Size: {x: 1, y: 1}
   m_AdaptiveModeThreshold: 0.5
@@ -105,3 +106,26 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::CandyCruisers.EnemyMissile
   speed: 5
+  homingSpeed: 3.5
+  smokeTrailScreenRatio: 0.33333334
+  smokeTrailWidthRatio: 0.5
+  turnDegreesPerSecond: 18
+  maxHomingAngle: 50
+  farFlashBeats: 4
+  nearFlashBeats: 0.5
+  flashAccelerationDistance: 10
+  fullFlashTempoDistance: 0.5
+--- !u!114 &5658927384019721663
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3598612984875198622}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 682c2938d03b49d28ac0330c0738a12d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::CandyCruisers.MissileFlightSound
+  audibleDistance: 8
+  fullVolumeDistance: 0.5

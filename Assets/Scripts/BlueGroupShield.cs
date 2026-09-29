@@ -11,7 +11,11 @@ namespace CandyCruisers
             public int Owner;
         }
         private readonly List<Edge> edges = new List<Edge>();
-        private readonly List<LineRenderer> lines = new List<LineRenderer>();
+        private Mesh band;
+        private MeshRenderer bandRenderer;
+        private readonly List<Vector3> vertices = new List<Vector3>();
+        private readonly List<Color> colors = new List<Color>();
+        private readonly List<int> triangles = new List<int>();
         private readonly HashSet<int> protectedIds = new HashSet<int>();
         public int EdgeCount => edges.Count;
         public bool Protects(int id) => protectedIds.Contains(id);
@@ -54,26 +58,48 @@ namespace CandyCruisers
             }
             foreach (var enemy in grid.GetComponentsInChildren<GridEnemy>())
                 enemy.GetComponent<EnemyAbilities>()?.SetGroupShielded(Protects(enemy.Id));
-            for (int i = 0; i < edges.Count; i++)
+            if (band == null && edges.Count > 0)
             {
-                if (i == lines.Count)
-                {
-                    var child = new GameObject("Rigid Blue perimeter", typeof(LineRenderer));
-                    child.transform.SetParent(transform, false);
-                    var line = child.GetComponent<LineRenderer>();
-                    line.sharedMaterial = grid.View(edges[i].Owner).Visuals.Body.sharedMaterial;
-                    line.useWorldSpace = false;
-                    line.positionCount = 2;
-                    line.startWidth = line.endWidth = .035f;
-                    line.startColor = line.endColor = new Color(.65f, .93f, 1);
-                    line.sortingOrder = 14;
-                    lines.Add(line);
-                }
-                lines[i].enabled = true;
-                lines[i].SetPosition(0, edges[i].A);
-                lines[i].SetPosition(1, edges[i].B);
+                var child = new GameObject("Rigid Blue perimeter", typeof(MeshFilter), typeof(MeshRenderer));
+                child.transform.SetParent(transform, false);
+                band = new Mesh { name = "Inward-fading Blue perimeter" };
+                band.MarkDynamic();
+                child.GetComponent<MeshFilter>().sharedMesh = band;
+                bandRenderer = child.GetComponent<MeshRenderer>();
+                bandRenderer.sharedMaterial = grid.View(edges[0].Owner).Visuals.Body.sharedMaterial;
+                bandRenderer.sortingOrder = 14;
             }
-            for (int i = edges.Count; i < lines.Count; i++) lines[i].enabled = false;
+            if (band == null) return;
+            vertices.Clear(); colors.Clear(); triangles.Clear();
+            foreach (var edge in edges)
+            {
+                var direction = (edge.B - edge.A).normalized;
+                var inward = new Vector3(direction.y, -direction.x, 0);
+                int start = vertices.Count;
+                for (int strip = 0; strip <= 8; strip++)
+                {
+                    float t = strip / 8f;
+                    var offset = inward * Mathf.Lerp(-.0175f, .21f, t);
+                    vertices.Add(edge.A - direction * .0175f + offset);
+                    vertices.Add(edge.B + direction * .0175f + offset);
+                    var tint = new Color(.82f, 1, 1, 1 - Mathf.SmoothStep(0, 1, t));
+                    colors.Add(tint); colors.Add(tint);
+                    if (strip == 8) continue;
+                    int v = start + strip * 2;
+                    triangles.Add(v); triangles.Add(v + 1); triangles.Add(v + 2);
+                    triangles.Add(v + 1); triangles.Add(v + 3); triangles.Add(v + 2);
+                }
+            }
+            band.Clear();
+            band.SetVertices(vertices); band.SetColors(colors); band.SetTriangles(triangles, 0);
+            band.RecalculateBounds();
+            bandRenderer.enabled = edges.Count > 0;
+        }
+
+        private void OnDestroy()
+        {
+            if (band == null) return;
+            if (Application.isPlaying) Destroy(band); else DestroyImmediate(band);
         }
 
         private void AddEdge(Vector3 a, Vector3 b, int owner) => edges.Add(new Edge { A = a, B = b, Owner = owner });

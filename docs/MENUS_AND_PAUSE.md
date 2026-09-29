@@ -1,6 +1,6 @@
 # Menus And Pause
 
-The gameplay scene opens on the main menu over the drifting star field. Play
+The gameplay scene opens on the main menu over a solid black background. Play
 or Enter starts the normal empty opening and phased-in fleet. No enemies,
 missiles or player actions run behind the main menu. The menu also shows the
 local top-five leaderboard when scores have been recorded.
@@ -12,10 +12,40 @@ The pause menu also offers Restart and Main Menu. Game over retains the final
 score and Restart, shows the local leaderboard, and now also offers Main Menu.
 R restarts a current run.
 
-Fatal fleet contact first enters a short Dying state. Player controls, fleet,
-abilities and missiles freeze while the player flashes and bursts into fragments.
-The game-over overlay and score submission wait for the death cue to finish
-(0.9 seconds for the placeholder). Pause cannot obscure this transition.
+Buttons show their hotkeys in parentheses: Play (Enter), Resume (P / Enter),
+Restart (R), and Main Menu (M). The game-over Restart button also accepts Enter.
+Left and Right adjust the main menu's starting level, with shortcuts shown on
+the minus and plus buttons. Typing one or two number keys directly enters the
+starting level, capped at 99. Numeric-keypad Enter works wherever Enter does.
+Main Menu and level-selection keys are active only in their corresponding menus;
+Escape remains an alternate pause/resume shortcut.
+
+Fatal fleet contact first enters a Dying state. Player controls, fleet,
+abilities and missiles freeze, with no regular death animation triggered.
+Music stops immediately at the fatal hit. The scene, rim, effects and score
+fade to full black over two beats of the song's tempo captured at that hit;
+the intact player stays visible above the blackout throughout the fade.
+Only after the fade completes does the game-over death cue begin, replacing
+the player with its detached flash and fragments. Its backdrop adds straight white radial
+streaks, small curved shockwaves close to the player and a white impact flare.
+At the fracture, colored shards from every enemy color unlocked at the current
+run level disperse outward from the hit, even if that color is absent from the
+fleet. The shards spin and fade beneath the player's death animation. The backdrop starts
+after the two-beat fade, peaks 0.14 seconds into the death animation at the fracture,
+and fades fully back to black by 0.62 seconds, before the options appear. Its origin follows the hit
+position and its geometry adapts to portrait, landscape and the rim crunch;
+it never changes gameplay time, camera framing or hitboxes.
+A glass-shattering sound starts at the same 0.14-second marker as the player's
+first fragments, with stereo echoes and a 2.1-second reverberant tail. The old descending
+game-over cadence no longer plays. Ordinary recoverable deaths do not black
+out the scene or stop the soundtrack.
+Score submission waits for the fade and then the full death cue (another 0.9 seconds for the
+placeholder). After a 0.2-second reveal delay, a centered game-over modal
+fades in over 0.65 seconds against the black screen, showing the final score, level, leaderboard
+and Restart/Main Menu options. Buttons, touch targets and keyboard actions stay
+inactive until the modal is fully visible. The transition uses unscaled time;
+pause cannot obscure or stall it. Compact screens show only the leaderboard rows
+that fit above the options.
 
 Pause is separate from the underlying Playing/Refilling state. It freezes
 scaled time, locks player input, and suspends the fleet, spawning, abilities and
