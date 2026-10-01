@@ -7,6 +7,10 @@ namespace CandyCruisers
     {
         public const string DefaultResourceName = "DiscoDescent";
         public const string MenuResourceName = "AnotherJoe";
+        public const string CountingResourceName = "CountingMetronome";
+        public const int BeatsPerMeasure = 4;
+        // Measure alignment is separate from the individual-beat clock.
+        public const int DownbeatOffsetBeats = 1;
         [System.Serializable]
         public sealed class Song
         {
@@ -15,12 +19,23 @@ namespace CandyCruisers
             public float beatOffsetSeconds;
             [Range(0, 11), Tooltip("Relative-major tonic: C=0, C#=1, ... B=11. For minor songs use their relative major.")]
             public int relativeMajorTonic;
-            public Song(string name, float tempo, float offset, int tonic = 0)
-            { resourceName = name; beatsPerMinute = tempo; beatOffsetSeconds = offset; relativeMajorTonic = tonic; }
+            [Range(0, 3)] public int downbeatOffsetBeats = DownbeatOffsetBeats;
+            public Song(string name, float tempo, float offset, int tonic = 0, int downbeat = DownbeatOffsetBeats)
+            { resourceName = name; beatsPerMinute = tempo; beatOffsetSeconds = offset; relativeMajorTonic = tonic;
+                downbeatOffsetBeats = downbeat; }
         }
         [SerializeField] private Song[] soundtrack = {
             new Song("DiscoDescent", 115.03f, .08f, 0), new Song("GameplayMusic", 142f, .09f, 8),
-            new Song("AnotherJoe", 140f, .1f, 2), new Song("PotentialForAnything", 125f, 0f, 5)
+            new Song("AnotherJoe", 140f, .1f, 2), new Song("PotentialForAnything", 125f, 0f, 5),
+            new Song("Skanska", 128f, 0f, 0),
+            new Song("TheThirdKind", 139.67f, 0f, 0),
+            new Song("DownToEarthPart1", 143.55f, .10449f, 0),
+            new Song("UntilICollapse", 139.67f, .09288f, 0),
+            new Song("WarOnActivism", 143.55f, .19737f, 0),
+            new Song("IntergalacticEmotionalBreakdown", 143.55f, .26703f, 0),
+            new Song("ShootingRobotsInSpace", 136f, .62694f, 0),
+            new Song("VertexStage1", 143.55f, .22059f, 0),
+            new Song(CountingResourceName, DefaultBeatsPerMinute, .08f, 0, 0)
         };
         private readonly System.Collections.Generic.List<int> remainingSongs = new System.Collections.Generic.List<int>();
         private readonly System.Random shuffle = new System.Random();
@@ -44,6 +59,7 @@ namespace CandyCruisers
             }
         }
         public int CurrentRelativeMajorTonic => CurrentSong?.relativeMajorTonic ?? customTrackRelativeMajorTonic;
+        public int CurrentDownbeatOffsetBeats => CurrentSong?.downbeatOffsetBeats ?? DownbeatOffsetBeats;
         private float FixedBeatDuration => 60f / Mathf.Max(1, CurrentSong?.beatsPerMinute ?? beatsPerMinute);
         public float CurrentTempo => 60f / BeatDuration;
         public float CurrentBeatOffset => CurrentBeatMap?.FirstBeatTime ?? CurrentSong?.beatOffsetSeconds ?? beatOffsetSeconds;
@@ -69,6 +85,7 @@ namespace CandyCruisers
         [SerializeField, Min(1)] private float beatsPerMinute = DefaultBeatsPerMinute;
         [SerializeField] private float beatOffsetSeconds = .08f;
         public const float DefaultVolume = .05f;
+        public const float DeathMinimumPitch = .04f;
         [SerializeField] private GameSession session;
         [SerializeField] private AudioClip track;
         [SerializeField] private AudioClip menuTrack;
@@ -180,7 +197,8 @@ namespace CandyCruisers
         public bool InGameplayRun => session != null &&
             (session.State == GameSession.RunState.Playing || session.State == GameSession.RunState.Refilling);
         public bool ShouldPlayMusic => session != null && !session.IsPaused &&
-            (InGameplayRun || session.State == GameSession.RunState.MainMenu);
+            (InGameplayRun || session.State == GameSession.RunState.MainMenu ||
+                session.State == GameSession.RunState.Dying && session.GameOverMusicGain > 0);
 
         public void Configure(GameSession gameSession)
         {
@@ -197,7 +215,22 @@ namespace CandyCruisers
         private void Update()
         {
             if ((Application.isEditor || Debug.isDebugBuild) && Input.GetKeyDown(KeyCode.F8)) SkipCurrentSong();
+            if ((Application.isEditor || Debug.isDebugBuild) && Input.GetKeyDown(KeyCode.F9)) PlayCountingMetronome();
             UpdatePlayback();
+        }
+        public bool PlayCountingMetronome()
+        {
+            if (!(Application.isEditor || Debug.isDebugBuild) || !InGameplayRun || track != null) return false;
+            var clip = Resources.Load<AudioClip>(CountingResourceName);
+            if (clip == null) return false;
+            carriedMenuTrack = null;
+            resourceTrack = clip;
+            songIndex = System.Array.FindIndex(soundtrack, song => song.resourceName == CountingResourceName);
+            remainingSongs.Remove(songIndex);
+            Source.Stop();
+            Source.clip = null;
+            UpdatePlayback();
+            return true;
         }
         public bool SkipCurrentSong()
         {
@@ -225,9 +258,13 @@ namespace CandyCruisers
             if (session == null) session = GetComponent<GameSession>();
             if (session != null && (session.State == GameSession.RunState.Dying || session.State == GameSession.RunState.GameOver))
             {
+                // Keep the current recording in place; the captured fade clock drives the tape stop.
                 ApplySourceSettings();
-                StopPlayback();
-                pausedSource = false;
+                if (session.GameOverMusicGain <= 0)
+                {
+                    StopPlayback();
+                    pausedSource = false;
+                }
                 return;
             }
             bool inMenu = session != null && session.State == GameSession.RunState.MainMenu;
@@ -330,9 +367,11 @@ namespace CandyCruisers
         {
             if (source == null) return;
             source.playOnAwake = false;
-            source.loop = !InGameplayRun || track != null && carriedMenuTrack == null;
+            bool dying = session != null && session.State == GameSession.RunState.Dying;
+            source.loop = !dying && (!InGameplayRun || track != null && carriedMenuTrack == null);
             source.spatialBlend = 0;
             source.dopplerLevel = 0;
+            source.pitch = dying ? Mathf.Pow(DeathMinimumPitch, session.GameOverBlackoutOpacity) : 1;
             source.volume = volume * MusicLoudness.GainFor(source.clip) * (session != null ? session.GameOverMusicGain : 1);
             source.mute = muted;
         }

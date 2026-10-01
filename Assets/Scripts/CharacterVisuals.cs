@@ -111,6 +111,11 @@ namespace CandyCruisers
             Trigger(defeatTrigger); Defeated.Invoke();
             return Spawn(defeatPrefab, PresentationCue.Kind.PlayerDefeat, color, 1);
         }
+        public PresentationCue PlayerFatalDefeat(EnemyColor color, int level)
+        {
+            Trigger(defeatTrigger); Defeated.Invoke();
+            return Spawn(defeatPrefab, PresentationCue.Kind.PlayerFatalDust, color, level);
+        }
         private PresentationCue Spawn(PresentationCue prefab, PresentationCue.Kind kind, EnemyColor color, int depth, int? multiplier = null, bool colorClear = false)
         {
             if (body == null || !Application.isPlaying) return null;

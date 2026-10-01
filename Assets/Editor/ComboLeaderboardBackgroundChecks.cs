@@ -12,6 +12,7 @@ namespace CandyCruisers.Editor
             CheckRunProgressCombo();
             CheckComboMilestonePresentation();
             CheckComboBreakPresentation();
+            CheckComboDeathFade();
             CheckComboColor();
             CheckScoreCalculation();
             CheckPlayerShotCombo();
@@ -52,6 +53,8 @@ namespace CandyCruisers.Editor
                 !GameSession.IsComboMilestone(50) && !GameSession.IsComboMilestone(74) &&
                 GameSession.IsComboMilestone(75) && GameSession.IsComboMilestone(125),
                 "Combo milestone thresholds are displayed x5, x25, x75 and every fifty after");
+            Check(!GameSession.ShouldDrawComboMultiplier(1) && GameSession.ShouldDrawComboMultiplier(2),
+                "Baseline x1 combo stays hidden until the streak raises the multiplier");
             var resting = GameSession.ComboMultiplierRestRect(10, 360, 20);
             Check(Mathf.Abs(resting.xMax - 370) < .001f && resting.yMin > 46 &&
                 resting.yMax < 20 + PlayerLifeIcons.ProgressOffset(960),
@@ -176,7 +179,11 @@ namespace CandyCruisers.Editor
             for (int i = 0; i < 75; i++) fine.Tick(.01f);
             Check(Mathf.Abs(coarse.SplitProgress - fine.SplitProgress) < .0001f && coarse.Tint == fine.Tint,
                 "Travel, drain and slash timing is stable across long and short frames");
+        }
 
+        private static void CheckComboDeathFade()
+        {
+            foreach (bool shotInFlight in new[] { false, true })
             SpecialEnemyChecks.Fixture((grid, player, tongue) =>
             {
                 var session = grid.gameObject.AddComponent<GameSession>();
@@ -184,22 +191,76 @@ namespace CandyCruisers.Editor
                 if (!Application.isPlaying) InvokeLifecycle(session, "OnEnable");
                 try
                 {
-                    AdvanceCombo(session, 3);
-                    Check(player.Hit() && session.ComboBreak.Active && session.ComboBreak.Multiplier == 4 &&
-                        session.Progress.ComboMultiplier == 1, "Player damage animates the lost combo and resets scoring immediately");
-                    session.Tick(.1f);
+                    var sentinel = ProgressionChecks.Add(grid, EnemyColor.Red, 4, 0);
+                    var target = ProgressionChecks.Add(grid, EnemyColor.Blue, 2, 0);
+                    grid.ClearMatchingChain(target.Id, EnemyColor.Blue);
+                    AdvanceCombo(session, 4);
+                    Check(ComboMilestoneActive(session), "Fixture interrupts a combo milestone");
+                    if (shotInFlight)
+                    {
+                        player.RefreshColor(true);
+                        Check(player.Fire() && tongue.Active, "Damage fixture starts an uncompleted shot");
+                    }
+                    Check(player.Hit() && player.LifeIcons.Active && !session.ComboBreak.Active &&
+                        !ComboMilestoneActive(session) && session.ComboDeathMultiplier == 5 &&
+                        session.ComboDeathOpacity == 1 && session.Progress.ComboMultiplier == 1,
+                        "Death keeps only the life-loss animation and a fading copy of the old corner combo");
+                    Check(session.ComboDeathColor == EnemyPalette.Get(EnemyColor.Blue),
+                        "Death fade keeps the last destroyed enemy color");
+                    session.Tick(GameSession.ComboDeathFadeSeconds / 2);
+                    Check(Mathf.Abs(session.ComboDeathOpacity - .5f) < .001f && !session.ComboBreak.Active,
+                        "Corner combo fades smoothly without launching a slash");
+                    float opacity = session.ComboDeathOpacity;
+                    session.Tick(0); session.Tick(-1);
+                    Check(session.ComboDeathOpacity == opacity, "Nonpositive time leaves the fade unchanged");
                     session.Pause();
-                    float age = session.ComboBreak.Age;
                     session.Tick(5);
-                    Check(session.ComboBreak.Age == age, "Pause freezes the break animation");
+                    Check(session.ComboDeathOpacity == opacity, "Pause freezes the corner fade");
                     session.Resume();
-                    session.Tick(2);
-                    Check(!session.ComboBreak.Active, "Break finishes after resuming");
+                    grid.ClearMatchingChain(sentinel.Id, EnemyColor.Red);
+                    Check(session.ComboColor == EnemyPalette.Get(EnemyColor.Red) &&
+                        session.ComboDeathColor == EnemyPalette.Get(EnemyColor.Blue),
+                        "Later enemy deaths cannot recolor the fading old combo");
+                    session.Tick(GameSession.ComboDeathFadeSeconds);
+                    Check(session.ComboDeathOpacity == 0 && !session.ComboBreak.Active,
+                        "Fade finishes cleanly without bringing back the combo break");
+                    player.TickSurvival(4);
+                    Check(player.Hit() && session.ComboDeathOpacity == 0 && !session.ComboBreak.Active,
+                        "Dying at the baseline multiplier does not display a fading x1");
+                    InvokeLifecycle(session, "ResetComboPresentation");
+                    Check(session.ComboDeathMultiplier == 0 && session.ComboDeathOpacity == 0,
+                        "Reset clears the retained death-fade multiplier");
                 }
                 finally
                 {
                     if (!Application.isPlaying) InvokeLifecycle(session, "OnDisable");
                 }
+            });
+
+            foreach (bool fatalHit in new[] { false, true })
+            SpecialEnemyChecks.Fixture((grid, player, tongue) =>
+            {
+                var session = grid.gameObject.AddComponent<GameSession>();
+                session.Configure(player);
+                if (!Application.isPlaying) InvokeLifecycle(session, "OnEnable");
+                if (fatalHit)
+                    for (int i = 0; i < PlayerMovement.MaxExtraLives; i++)
+                    { player.Hit(); player.TickSurvival(4); }
+                AdvanceCombo(session, 3);
+                if (fatalHit) Check(player.Hit(), "Last-life hit starts fatal defeat");
+                else
+                {
+                    session.Progress.ResetCombo();
+                    session.Tick(0);
+                    Check(session.ComboBreak.Active, "Fixture starts a normal missed-shot combo break");
+                    InvokeLifecycle(session, "BeginPlayerDeath");
+                }
+                Check(session.State == GameSession.RunState.Dying && !session.ComboBreak.Active &&
+                    session.ComboDeathMultiplier == 4 && session.ComboDeathOpacity == 1,
+                    "Fatal defeat also replaces any combo break with the corner fade");
+                session.Tick(GameSession.ComboDeathFadeSeconds + .01f);
+                Check(session.ComboDeathOpacity == 0 && !session.ComboBreak.Active,
+                    "Fatal blackout allows the corner combo to finish fading");
             });
         }
 
@@ -414,7 +475,7 @@ namespace CandyCruisers.Editor
                 framing.TickBackground(1f);
                 float levelOneSpin = Mathf.Abs(framing.BackgroundSpinAngle - levelOneStart);
                 int levelOneDirection = framing.SpinDirection;
-                session.Progress.RegisterClear(session.Progress.NextThreshold - session.Progress.Defeated, false);
+                session.Progress.RegisterClear(session.Progress.NextThreshold - session.Progress.Defeated, true);
                 framing.TickBackground(.2f);
                 Check(framing.DisplayedLevel == 2 && framing.LevelTransitionRemaining > 0 &&
                     framing.DisplayedBackgroundIndex == 1 && background.sprite != firstSprite &&
@@ -429,12 +490,12 @@ namespace CandyCruisers.Editor
                 Check(Vector3.Distance(start, background.transform.localPosition) > .001f,
                     "Background drifts over time");
                 framing.SolidBlackBackground = true;
-                session.Progress.RegisterClear(session.Progress.NextThreshold - session.Progress.Defeated, false);
-                framing.TriggerWaveSpawnEffect(); framing.TickBackground(2);
+                session.Progress.RegisterClear(session.Progress.NextThreshold - session.Progress.Defeated, true);
+                framing.TriggerWaveSpawnEffect(); framing.TickBackground(.1f);
                 var camera = cameraObject.GetComponent<Camera>();
                 Check(camera.clearFlags == CameraClearFlags.SolidColor && camera.backgroundColor == Color.black &&
                     !background.enabled && framing.WavePulseRemaining == 0 && framing.LevelTransitionRemaining == 0,
-                    "Black background stays black across wave and level changes");
+                    "Black background keeps ordinary starfields hidden without running a level transition");
                 foreach (var layer in UnityEngine.Object.FindObjectsByType<SpriteRenderer>(FindObjectsSortMode.None))
                     if (layer.name == background.name + " Crossfade")
                         Check(!layer.enabled, "Old starfield crossfade is hidden in black mode");

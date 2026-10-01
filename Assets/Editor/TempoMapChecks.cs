@@ -84,6 +84,17 @@ namespace CandyCruisers.Editor
             Check(removals == 3 && animation.Finished, "All mapped removals occur exactly once");
             animation.Tick(10);
             Check(removals == 3, "Long frames cannot repeat completed removals");
+
+            removals = 0;
+            animation.Begin(colors, duration: 1.9f, beatDurations: new[] { .5f, .25f, .75f }, holdDuration: .4f);
+            Near(animation.PlaybackDuration, 1.9f, "Celebration duration includes the lead-in hold");
+            animation.Tick(.39f);
+            Check(removals == 0 && animation.Color == Color.white && colors.TrueForAll(animation.Visible),
+                "Lead-in hold keeps every earned bar visible before removals begin");
+            animation.Tick(.27f);
+            Check(removals == 0 && animation.Color != Color.white, "First bar still waits its beat after the hold");
+            animation.Tick(1.25f);
+            Check(removals == 3 && animation.Finished, "Held celebrations still remove every mapped bar once");
         }
 
         private static void CheckSoundtrack()

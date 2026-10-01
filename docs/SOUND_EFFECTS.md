@@ -65,10 +65,12 @@ entries below re-enables menu and gameplay music.
 When local recordings are present, the player selects a random soundtrack song for the menu. Starting gameplay
 continues that same song from its current sample position without a stop, seek,
 restart, volume change or beat-phase reset. The song finishes its current pass,
-then gameplay shuffles the remaining recordings. The four-song playlist contains
-Another Joe, Potential For Anything, Disco Descent, and the original GameplayMusic
-track. The carried menu song counts as the first entry in the shuffle bag. Each
-song finishes before the next
+then gameplay shuffles the remaining recordings. The playlist contains Another
+Joe, Potential For Anything, Disco Descent, the original GameplayMusic track,
+Skanska, The Third Kind, Down To Earth Part 1, Until I Collapse, War On Activism,
+Intergalactic Emotional Breakdown, Shooting Robots in Space, Vertex Stage 1, and
+the developer counting metronome. The carried menu song counts as the first entry
+in the shuffle bag. Each song finishes before the next
 begins. Every shuffle bag includes each song once and avoids an immediate repeat
 at its boundary.
 Playlist randomness does not consume gameplay random numbers.
@@ -78,18 +80,16 @@ Inspector override, and it is disabled in release builds. An assigned gameplay
 override takes over only after the carried menu song finishes.
 Fatal death stops the current track immediately, before the death animation
 advances. The scene fades to black over the duration of the next two mapped beats,
-captured before playback stops, while the intact player stays visible. Only then does the game-over death
+captured before playback stops, while the intact player stays visible and moves to centerstage. Only then does the game-over death
 animation start. `PlayerShatter` starts once at `PlayerDeathBurst.ShatterSeconds`
 (0.14 seconds into that animation, after the fade), the same marker that releases the fragments. There is no later
 game-over cadence or music fade. Recoverable deaths leave music unchanged.
 Pause keeps the song position and resumes from there. Supplied soundtrack
-recordings are Waveform Audio File Format files.
+recordings can use any Unity-supported local audio format.
 
 The soundtrack entries in `GameplayMusicPlayer` contain independently editable
-tempo and beat offsets. Initial recording-based estimates are Disco Descent 115.03,
-original GameplayMusic 142, Another Joe 140, and Potential For Anything 125 beats
-per minute. Beat offsets are 0.08, 0.09, 0.10, and 0 seconds respectively.
-These estimates are editable in `GameplayMusicPlayer`.
+tempo and beat offsets. Initial recording-based estimates cover each playlist
+entry and are editable in `GameplayMusicPlayer`.
 
 ### Variable-tempo maps
 
@@ -108,11 +108,13 @@ These are machine estimates: syncopation, sparse introductions, fills and fading
 outros can still produce misplaced or half/double-time beats.
 
 `SecondsForBeats` integrates future intervals for opening delays, color-clear dust
-and the game-over blackout. Clear celebrations use one mapped interval per earned
-bar, and Green fleet movement accounts for the duration of each completed beat,
-including when a long frame crosses a tempo change. Pausing freezes the sample
-clock; seeking and song changes select timing from the actual playing clip.
-Musical flourish/section markers are not implemented by these beat maps.
+and the game-over blackout. Clear celebrations choose the next eligible downbeat
+first, then divide the available beat span before the reserved pre-spawn beat
+evenly across the earned bars. Green fleet movement accounts for the duration of
+each completed beat, including when a long frame crosses a tempo change. Pausing
+freezes the sample clock; seeking and song changes select timing from the actual
+playing clip. Musical flourish/section markers are not implemented by these beat
+maps.
 
 Generate maps offline with the version-pinned analyzer:
 
@@ -120,7 +122,7 @@ Generate maps offline with the version-pinned analyzer:
 python3 -m venv /tmp/candy-beats
 /tmp/candy-beats/bin/pip install -r tools/beat-map-requirements.txt
 /tmp/candy-beats/bin/python tools/generate_beat_map.py \
-  "Assets/Resources/<RecordingName>.wav" \
+  "Assets/Resources/<RecordingName>.<audio-extension>" \
   "Assets/Resources/BeatMaps/<RecordingName>.json" \
   --min-tempo 90 --max-tempo 160 --onset-max-frequency 500
 /tmp/candy-beats/bin/python -m unittest discover -s tools -p 'test_*.py'
@@ -144,17 +146,22 @@ At the midpoint, the view is compressed by twelve percent and the boundary,
 outline and corners reach three times their normal visible thickness. Size and
 thickness return smoothly to normal without an added brightness flash. This is a
 camera presentation effect: actor positions, collision bounds, wrap limits and
-gameplay camera dimensions stay fixed, and pointer projection follows the view. Enemies
+gameplay camera dimensions stay fixed, pointer projection follows the view, and
+the compression has no sound cue. Enemies
 pulse on the musical downbeat and the player on the opposite half-beat. A separate
 visual pivot keeps this motion independent of spawn growth, disguises and hitboxes.
-Clear transitions last one upcoming current-track beat per earned bar. Each beat starts
-white, flashes that bar's color for the second half, and removes the bar at the
-next beat boundary. The last bar is reserved for the final flash. The transition ends on
-that color, which becomes the player's color as the new fleet appears. Partial sets
-play the replaceable `BarPowerDown` cue exactly when each earned bar disappears,
-descending two semitones per bar. Complete sets retain their jackpot celebration
-and play `BarPowerUp` at each removal, ascending along the major scale. Each power-up
-cue sweeps upward in pitch; both cues can be replaced independently in the sound settings.
+Clear transitions stretch from the fleet clear toward the next eligible
+current-track downbeat. The final regular bar removal lands one beat before the
+spawn downbeat; earned-life clears reserve two beats so the life pulse can occupy
+the intervening beat. The available bar span is divided evenly across the earned
+bars. Each slot starts white, flashes that bar's color for the second half, and
+removes the bar at the slot boundary. The last bar is reserved for the final
+flash. The transition ends on that color, which becomes the player's color as
+the new fleet appears. Partial sets play the replaceable `BarPowerDown` cue
+exactly when each earned bar disappears, descending two semitones per bar.
+Complete sets retain their jackpot celebration and play `BarPowerUp` at each
+removal, ascending along the major scale. Each power-up cue sweeps upward in
+pitch; both cues can be replaced independently in the sound settings.
 Tongue return
 and lingering death particles do not extend this beat-count deadline; pause freezes it.
 
@@ -224,7 +231,7 @@ reload.
 
 The `SoundEffects` component exposes replaceable clips and per-cue volume for
 missile flight, shield power-up, Yellow transform/hide/reveal, Purple warps, enemy
-defeat, wave arrivals, level changes, extra lives, and game over. Green movement
+defeat, level changes, extra lives, and game over. Green movement
 pulses and dashes are visual-only.
 Missing clips use distinct synthesized arcade tones from `ArcadeSoundClips`.
 One-shots share a 24-voice pool, separate from the continuously animated tongue
@@ -244,7 +251,13 @@ and glass-like ringing, then adds distinct left/right echoes at 0.18/0.215 secon
 and damped room reflections, with a 2.1-second total stereo tail. Effects are
 baked into this cue only, so pooled voices never carry reverb into unrelated
 sounds. It supports clip replacement, per-cue volume, pause and master mute.
-Music is already stopped at this point. The legacy `GameOver`
+During the preceding four-beat blackout, the current music recording slows continuously
+like a tape stop, dropping from normal speed to 4 percent speed (one fifth speed at
+the midpoint) while its normalized volume fades to zero. This envelope follows the
+unscaled death-fade clock captured at the fatal hit, not the slowing audio clock.
+The track is neither restarted nor replaced; playlist advancement is suspended.
+Music is fully stopped before the fatal dust and shatter, which retain their normal
+speed and volume. Normal playback restores the original music pitch. The legacy `GameOver`
 cadence remains available for explicit use but the session no longer plays it.
 
 ## Missile Flight

@@ -77,9 +77,9 @@ namespace CandyCruisers.Editor
                 grid.RefreshSpecials();
                 Check(blue.Tier == 2 && lower.Tier == 2 && !red.IsSpecial && grid.GroupShield.EdgeCount == 8,
                     "Three connected Blues upgrade and produce only the eight exterior edges of an L group");
-                Check(blue.GetComponentInChildren<SpriteRenderer>().sprite == EnemyPlaceholderArt.Triangle &&
+                Check(blue.GetComponentInChildren<SpriteRenderer>().sprite == grid.GetComponent<EnemyRowSpawner>().SpecialSprite &&
                     !blue.Visuals.Root.Find("Shield").GetComponentInChildren<SpriteRenderer>().enabled,
-                    "Tier two uses triangle art and replaces individual shields with a group perimeter");
+                    "Tier two uses special art and replaces individual shields with a group perimeter");
                 player.transform.position = new Vector3(lower.transform.position.x, -4.6f, 0);
                 Check(player.Fire(), "Fire a mismatched ordinary shot at the rigid shield");
                 tongue.Tick(.26f, grid);
@@ -236,6 +236,12 @@ namespace CandyCruisers.Editor
                 renderer.color = EnemyPalette.Get(EnemyColor.Red);
                 var original = renderer.color;
                 var pulse = flashing.GetComponent<EnemyMissile>();
+                // This fallback-tempo check must not borrow the live scene's song clock.
+                var flashClock = flashing.AddComponent<GameplayMusicPlayer>();
+                flashClock.enabled = false;
+                flashClock.StopPlayback();
+                flashClock.Source.clip = null;
+                pulse.ConfigureFlashClock(flashClock);
                 flashing.transform.position = Vector3.up * 4.5f;
                 pulse.SetTarget(null, true);
                 float halfFlash = 30f / GameplayMusicPlayer.DefaultBeatsPerMinute * EnemyMissile.DefaultFarFlashBeats;
@@ -265,8 +271,9 @@ namespace CandyCruisers.Editor
                     Check(!first.IsSpecial && !diagonal.IsSpecial, "Pairs and diagonals do not promote " + color);
                     Add(grid, color, 1, 1);
                     grid.RefreshSpecials();
+                    var specialSprite = grid.GetComponent<EnemyRowSpawner>().SpecialSprite;
                     Check(grid.GetComponentsInChildren<GridEnemy>().All(e => e.IsSpecial &&
-                        e.GetComponentInChildren<SpriteRenderer>().sprite == EnemyPlaceholderArt.Triangle), "Connected group promotes every " + color);
+                        e.GetComponentInChildren<SpriteRenderer>().sprite == specialSprite), "Connected group promotes every " + color);
                     grid.SetColor(first.Id, EnemyColor.Red);
                     Check(!first.IsSpecial, "Changing color resets the upgraded tier");
                 });
@@ -441,6 +448,7 @@ namespace CandyCruisers.Editor
                 var spawner = root.GetComponent<EnemyRowSpawner>();
                 spawner.Configure(Prefab(EnemyColor.Blue), Prefab(EnemyColor.Red));
                 spawner.ConfigureNewTypes(Prefab(EnemyColor.Green), Prefab(EnemyColor.Purple), Prefab(EnemyColor.Yellow), Prefab(EnemyColor.Orange));
+                spawner.ConfigureSpecialSprite(AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Art/space-invader-squid.png"));
                 grid.ConfigureAbilities(AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Red Missile.prefab"),
                     AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Art/ShieldArc.png"));
                 var body = controller.GetComponentInChildren<SpriteRenderer>();

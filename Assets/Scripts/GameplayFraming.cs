@@ -7,7 +7,7 @@ namespace CandyCruisers
     public sealed class GameplayFraming : MonoBehaviour
     {
         private const int StarfieldCount = 10;
-        public const float WaveCrunchCompression = .12f;
+        public const float WaveCrunchCompression = .084f;
         private float waveCrunch;
         public float WaveCrunchScale => 1 - WaveCrunchCompression * waveCrunch;
 
@@ -130,9 +130,12 @@ namespace CandyCruisers
 
         public void TickBackground(float seconds)
         {
+            seconds = Mathf.Max(0, seconds);
+            int level = CurrentLevel();
+            if (displayedLevel < 0) InitializeDisplayedLevel(level);
+            else if (level != displayedLevel) StartLevelCrossFade(level);
             if (solidBlackBackground)
             {
-                displayedLevel = CurrentLevel();
                 wavePulseRemaining = levelCrossFadeRemaining = 0;
                 Refresh();
                 return;
@@ -140,21 +143,7 @@ namespace CandyCruisers
             if (starBackground == null) return;
             EnsureStarfields();
             CaptureBackgroundHome();
-            int level = CurrentLevel();
-            if (displayedLevel < 0)
-            {
-                displayedLevel = level;
-                spinDirection = level % 2 == 0 ? -1 : 1;
-                transitionFrom = transitionTo = TintForLevel(level);
-                starBackground.sprite = StarfieldForLevel(level);
-                starBackground.color = transitionTo;
-            }
-            else if (level != displayedLevel)
-            {
-                StartLevelCrossFade(level);
-            }
 
-            seconds = Mathf.Max(0, seconds);
             backgroundPhase += seconds * backgroundCyclesPerSecond;
             spinAngle += seconds * spinDirection * SpinSpeedForLevel(displayedLevel);
             wavePulseRemaining = Mathf.Max(0, wavePulseRemaining - seconds);
@@ -215,6 +204,15 @@ namespace CandyCruisers
         private void StartLevelCrossFade(int level)
         {
             int previous = displayedLevel;
+            displayedLevel = level;
+            if (Mathf.Abs(level - previous) % 2 == 1) spinDirection = -spinDirection;
+            transitionFrom = TintForLevel(previous);
+            transitionTo = TintForLevel(level);
+            if (solidBlackBackground || starBackground == null)
+            {
+                levelCrossFadeRemaining = 0;
+                return;
+            }
             EnsureCrossFadeBackground();
             if (crossFadeBackground != null)
             {
@@ -223,13 +221,20 @@ namespace CandyCruisers
                 crossFadeBackground.sortingOrder = starBackground.sortingOrder - 1;
                 crossFadeBackground.enabled = true;
             }
-            displayedLevel = level;
-            if (Mathf.Abs(level - previous) % 2 == 1) spinDirection = -spinDirection;
-            transitionFrom = TintForLevel(previous);
-            transitionTo = TintForLevel(level);
             levelCrossFadeRemaining = levelCrossFadeSeconds;
             starBackground.sprite = StarfieldForLevel(level);
             starBackground.color = WithAlpha(transitionTo, 0);
+        }
+
+        private void InitializeDisplayedLevel(int level)
+        {
+            displayedLevel = level;
+            spinDirection = level % 2 == 0 ? -1 : 1;
+            transitionFrom = transitionTo = TintForLevel(level);
+            if (starBackground == null || solidBlackBackground) return;
+            EnsureStarfields();
+            starBackground.sprite = StarfieldForLevel(level);
+            starBackground.color = transitionTo;
         }
 
         private void CaptureBackgroundHome()

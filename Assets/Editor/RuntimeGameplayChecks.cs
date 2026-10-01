@@ -27,6 +27,7 @@ namespace CandyCruisers.Editor
         private static int pausedSoundSample;
         private static float pausedSoundPitch;
         private static bool observedGameOverFade;
+        private static bool observedDeathMusicSlowdown;
         private static bool liveShieldPrepared;
         private static GridEnemy liveShooter;
 
@@ -329,8 +330,9 @@ namespace CandyCruisers.Editor
                         player.Lives == 0 && !player.Alive,
                         "A full player row starts the death animation before game over without requiring contact");
                     var deathMusic = grid.GetComponent<GameplayMusicPlayer>();
-                    Require(!deathMusic.ShouldPlayMusic && !deathMusic.Source.isPlaying && deathMusic.Source.volume == 0,
-                        "Fatal death stops the real audio source immediately, before the death animation advances");
+                    Require(deathMusic.ShouldPlayMusic && deathMusic.Source.isPlaying && deathMusic.Source.volume > 0 &&
+                        deathMusic.Source.pitch == 1,
+                        "Fatal death preserves the real music source before its four-beat slowdown begins");
                     int filledEnemies = spawner.CurrentRowWidth * GridModel.Rows;
                     Require(grid.Model.Count == filledEnemies && !player.Fire() && !grid.enabled && !grid.GetComponent<EnemyGridMovement>().enabled,
                         "Game over freezes play without losing enemies");
@@ -339,26 +341,37 @@ namespace CandyCruisers.Editor
                     Require(!spawner.TryAdvance() && grid.Model.Count == filledEnemies, "Game over rejects more rows");
                     ScreenCapture.CaptureScreenshot("TestResults/player-death.png");
                     gameOverAt = EditorApplication.timeSinceStartup;
+                    observedDeathMusicSlowdown = false;
                     phase = 11;
                 }
-                else if (phase == 11 &&
-                    grid.GetComponent<GameSession>().State == GameSession.RunState.GameOver)
+                else if (phase == 11)
                 {
                     var session = grid.GetComponent<GameSession>();
                     var music = grid.GetComponent<GameplayMusicPlayer>();
-                    if (session.GameOverModalOpacity > .15f && session.GameOverModalOpacity < .85f && !observedGameOverFade)
+                    if (session.State == GameSession.RunState.Dying)
+                    {
+                        if (session.GameOverBlackoutOpacity > .25f && session.GameOverBlackoutOpacity < .8f)
+                        {
+                            Require(music.Source.isPlaying && music.Source.volume > 0 && music.Source.pitch < .6f &&
+                                music.Source.pitch > 0, "Real frames keep the fading music playing at a dramatically reduced speed");
+                            observedDeathMusicSlowdown = true;
+                        }
+                        return;
+                    }
+                    Require(observedDeathMusicSlowdown, "The real death sequence includes the music collapse before game over");
+                    if (session.GameOverTitleOpacity > .15f && session.GameOverTitleOpacity < .85f && !observedGameOverFade)
                     {
                         Require(!music.Source.isPlaying && music.Source.volume == 0 && session.GameOverBlackoutOpacity == 1,
-                            "The game-over modal fades in over a fully black scene with music stopped");
-                        Require(!session.GameOverMenuReady && !session.HandleMenuKey(KeyCode.Return),
-                            "Invisible and fading options cannot accidentally restart the run");
+                            "The game-over title fades in over a fully black scene with music stopped");
+                        Require(!session.GameOverTitleReady && !session.HandleMenuKey(KeyCode.Return),
+                            "The fading title cannot be skipped by an accidental restart");
                         ScreenCapture.CaptureScreenshot("TestResults/game-over-fading.png");
                         observedGameOverFade = true;
                         Time.timeScale = 0;
                     }
-                    if (session.GameOverMusicGain > 0 || !session.GameOverMenuReady) return;
-                    Require(observedGameOverFade && session.GameOverModalOpacity == 1 && !music.Source.isPlaying,
-                        "Unscaled game-over transition completes with a visible modal and silent music");
+                    if (session.GameOverMusicGain > 0 || !session.GameOverTitleReady) return;
+                    Require(observedGameOverFade && session.GameOverTitleOpacity == 1 && !music.Source.isPlaying,
+                        "Unscaled game-over transition completes with the title fully visible and silent music");
                     Time.timeScale = 1;
                     Require(player.FatallyDefeated && !player.Alive, "Player remains defeated until restart");
                     ScreenCapture.CaptureScreenshot("TestResults/game-over.png");
@@ -555,15 +568,19 @@ namespace CandyCruisers.Editor
             { enemy.gameObject.SetActive(false); UnityEngine.Object.Destroy(enemy.gameObject); }
             var session = grid.GetComponent<GameSession>();
             movement.UseGreenDashes = false;
-            session.Progress.RegisterClear(269, false);
+            session.Progress.Reset(5);
+            session.Progress.RegisterClear(session.Progress.NextThreshold - session.Progress.Defeated - 1, true);
             var colors = new[] { EnemyColor.Blue, EnemyColor.Blue, EnemyColor.Green, EnemyColor.Red, EnemyColor.Purple, EnemyColor.Yellow };
             for (int row = 0; row < 3; row++)
             for (int column = 0; column < GridModel.Columns; column++)
                 ProgressionChecks.Add(grid, colors[(column + row * 2) % 6], column, row);
             var single = grid.View(grid.Model.At(2, 0).Id);
             grid.ClearMatchingChain(single.Id, EnemyColor.Green);
-            Require(session.Progress.Level == 6, "Live clear crosses Yellow unlock threshold");
-            Require(Mathf.Abs(movement.CurrentSpeed - .0345f * grid.Model.ColorCount(EnemyColor.Green)) < .001f, "Live level increase scales base speed");
+            Require(session.Progress.Level == 5 && session.Progress.EarnedLevel == 6,
+                "Live clear banks the next level without changing active wave tuning");
+            Require(Mathf.Abs(movement.CurrentSpeed -
+                .03f * CombatBalance.FleetSpeedMultiplier(session.Progress.Level) * grid.Model.ColorCount(EnemyColor.Green)) < .001f,
+                "Banked level progress waits to scale live fleet speed");
             if (previewOnly) session.Progress.RegisterClear(30, false);
             var enemies = grid.GetComponentsInChildren<GridEnemy>();
             var yellow = enemies.First(e => e.Color == EnemyColor.Yellow && e.Row == 1);

@@ -17,7 +17,8 @@ namespace CandyCruisers.Editor
                 {
                     if (!SoundEffects.IsPlayableEffect(effect))
                     {
-                        Check(sounds.GetClip(effect) == null && !sounds.PlayCue(effect), "Retired movement and Red launch cues stay unavailable");
+                        Check(sounds.GetClip(effect) == null && !sounds.PlayCue(effect),
+                            "Retired movement, Red launch and wave-arrival cues stay unavailable");
                         continue;
                     }
                     var clip = sounds.GetClip(effect);
@@ -111,12 +112,18 @@ namespace CandyCruisers.Editor
                 var pitches = new List<float>();
                 sounds.CuePlayed += (effect, pitch) => { played.Add(effect); pitches.Add(pitch); };
                 var plan = new[] { EnemyColor.Red, EnemyColor.Red, EnemyColor.Red, EnemyColor.Blue, EnemyColor.Blue };
-                Check(grid.GetComponent<EnemyRowSpawner>().SpawnBatch(plan) && played.Count(e => e == SoundEffect.WaveSpawn) == 1,
-                    "A new batch plays one wave cue, not one per ship");
+                Check(grid.GetComponent<EnemyRowSpawner>().SpawnBatch(plan) && !played.Contains(SoundEffect.WaveSpawn),
+                    "A new batch spawns without a wave-arrival sound cue");
                 session.Progress.RegisterClear(session.Progress.NextThreshold - 1, false);
                 grid.ClearMatchingChain(grid.Model.At(0, 0).Id, EnemyColor.Red);
-                Check(session.Progress.Level == 2 && played.Count(e => e == SoundEffect.LevelUp) == 1, "Level transition plays one cue");
-                var body = grid.View(grid.Model.At(3, 0).Id).Visuals.Body;
+                Check(session.Progress.Level == 1 && session.Progress.LevelUpPending &&
+                    played.Count(e => e == SoundEffect.LevelUp) == 0, "Mid-wave threshold crossing banks the level without a cue");
+                var body = new GameObject("Defeat cue source", typeof(SpriteRenderer)).GetComponent<SpriteRenderer>();
+                body.transform.SetParent(grid.transform, false);
+                body.sprite = grid.View(grid.Model.At(3, 0).Id).Visuals.Body.sprite;
+                grid.ClearMatchingChain(grid.Model.At(3, 0).Id, EnemyColor.Blue);
+                Check(session.Progress.Level == 2 && played.Count(e => e == SoundEffect.LevelUp) == 1,
+                    "Level transition plays one cue when the fleet is cleared");
                 int count = played.Count;
                 var cue = PresentationCue.Spawn(null, PresentationCue.Kind.Defeat, body, EnemyColor.Blue, 3, 8);
                 try
@@ -128,7 +135,11 @@ namespace CandyCruisers.Editor
                     count = played.Count; cue.Tick(.01f);
                     Check(played.Count == count, "Defeat cue sounds once");
                 }
-                finally { UnityEngine.Object.DestroyImmediate(cue.gameObject); }
+                finally
+                {
+                    UnityEngine.Object.DestroyImmediate(cue.gameObject);
+                    UnityEngine.Object.DestroyImmediate(body.gameObject);
+                }
             });
             Debug.Log("Event presentation checks passed: clip samples, gameplay cues, pitch, pause, group shield fade and growth versus warp arrivals.");
         }

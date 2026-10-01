@@ -126,8 +126,9 @@ namespace CandyCruisers.Editor
                 Check(milestone == 5, "Immediate streak updates trigger milestone presentation during flight");
                 Check(!player.Fire() && session.Progress.ComboMultiplier == 5, "Rejected fire cannot reset per-shot colors or streak");
                 Check(player.Hit() && !tongue.Active && session.Progress.ComboStreak == 0 &&
-                    session.Progress.ActiveComboMultiplier == 1 && session.ComboBreak.Multiplier == 5,
-                    "Damage resets the newly earned combo without completion restoring it");
+                    session.Progress.ActiveComboMultiplier == 1 && !session.ComboBreak.Active &&
+                    session.ComboDeathMultiplier == 5 && session.ComboDeathOpacity == 1 && player.LifeIcons.Active,
+                    "Damage resets the combo, fades its corner display and plays only life loss");
                 Check(!session.Progress.RegisterShotColor(EnemyColor.Blue), "A canceled shot cannot award late color credit");
             });
         }

@@ -1192,7 +1192,7 @@ MonoBehaviour:
   purplePrefab: {fileID: 4273693457131951102, guid: 13ed4e1c76dbc401b8e172d383457094, type: 3}
   yellowPrefab: {fileID: 6010055133240744413, guid: f38cecfeaa31d4a30bc3eae1919fa272, type: 3}
   orangePrefab: {fileID: 3807629183320897738, guid: f6669e40a64914639819c42436b731e1, type: 3}
-  specialSprite: {fileID: 0}
+  specialSprite: {fileID: 21300000, guid: 6196b60ab31648e48f1a9afe53a4a6f7, type: 3}
 --- !u!114 &1463775472
 MonoBehaviour:
   m_ObjectHideFlags: 0

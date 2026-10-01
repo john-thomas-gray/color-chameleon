@@ -7,6 +7,8 @@ namespace CandyCruisers.Editor
 {
     public static class GameplayUpgrade
     {
+        private const string EnemySpritePath = "Assets/Art/space-invader-normal.png";
+        private const string SpecialEnemySpritePath = "Assets/Art/space-invader-squid.png";
         private const string MissileSpritePath = "Assets/Art/missile.png";
 
         public static void Apply()
@@ -23,9 +25,10 @@ namespace CandyCruisers.Editor
             if (spawner == null) spawner = root.AddComponent<EnemyRowSpawner>();
             spawner.Configure(AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Blue Enemy.prefab"),
                 AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Red Enemy.prefab"));
-            spawner.ConfigureNewTypes(CreateType(EnemyColor.Green, "watermelon"),
-                CreateType(EnemyColor.Purple, "Plum"), CreateType(EnemyColor.Yellow, "Lemon"),
+            spawner.ConfigureNewTypes(CreateType(EnemyColor.Green),
+                CreateType(EnemyColor.Purple), CreateType(EnemyColor.Yellow),
                 AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Orange Enemy.prefab"));
+            spawner.ConfigureSpecialSprite(ImportSprite(SpecialEnemySpritePath));
             grid.ConfigureAbilities(CreateMissile(), CreateShieldSprite());
             var session = root.GetComponent<GameSession>();
             if (session == null) session = root.AddComponent<GameSession>();
@@ -35,20 +38,12 @@ namespace CandyCruisers.Editor
             AssetDatabase.SaveAssets();
         }
 
-        private static GameObject CreateType(EnemyColor color, string art)
+        private static GameObject CreateType(EnemyColor color)
         {
             string path = "Assets/Prefabs/" + color + " Enemy.prefab";
             var existing = AssetDatabase.LoadAssetAtPath<GameObject>(path);
             if (existing != null) return existing;
-            string spritePath = "Assets/Art/" + art + ".png";
-            AssetDatabase.ImportAsset(spritePath);
-            var importer = (TextureImporter)AssetImporter.GetAtPath(spritePath);
-            importer.textureType = TextureImporterType.Sprite;
-            importer.spritePixelsPerUnit = 256;
-            importer.alphaIsTransparency = true;
-            importer.mipmapEnabled = false;
-            importer.SaveAndReimport();
-            var sprite = AssetDatabase.LoadAssetAtPath<Sprite>(spritePath);
+            var sprite = ImportSprite(EnemySpritePath);
             var instance = new GameObject(color + " Enemy", typeof(SpriteRenderer));
             var renderer = instance.GetComponent<SpriteRenderer>();
             renderer.sprite = sprite;
@@ -58,6 +53,20 @@ namespace CandyCruisers.Editor
             var prefab = PrefabUtility.SaveAsPrefabAsset(instance, path);
             Object.DestroyImmediate(instance);
             return prefab;
+        }
+
+        private static Sprite ImportSprite(string spritePath)
+        {
+            AssetDatabase.ImportAsset(spritePath);
+            var importer = (TextureImporter)AssetImporter.GetAtPath(spritePath);
+            importer.textureType = TextureImporterType.Sprite;
+            importer.spriteImportMode = SpriteImportMode.Single;
+            importer.spritePixelsPerUnit = 256;
+            importer.alphaIsTransparency = true;
+            importer.mipmapEnabled = false;
+            importer.filterMode = FilterMode.Point;
+            importer.SaveAndReimport();
+            return AssetDatabase.LoadAssetAtPath<Sprite>(spritePath);
         }
 
         private static void CreatePlayfieldBorder()

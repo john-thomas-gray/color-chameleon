@@ -22,10 +22,13 @@ namespace CandyCruisers
         public void ConfigureNewTypes(GameObject green, GameObject purple, GameObject yellow, GameObject orange = null)
         { greenPrefab = green; purplePrefab = purple; yellowPrefab = yellow; orangePrefab = orange; }
         public void ConfigureOrange(GameObject orange) => orangePrefab = orange;
+        public void ConfigureSpecialSprite(Sprite sprite) => specialSprite = sprite;
         public Sprite SpecialSprite => specialSprite != null ? specialSprite : EnemyPlaceholderArt.Triangle;
         public GameObject Prefab(EnemyColor color) => color == EnemyColor.Blue ? bluePrefab :
             color == EnemyColor.Red ? redPrefab : color == EnemyColor.Green ? greenPrefab :
             color == EnemyColor.Purple ? purplePrefab : color == EnemyColor.Orange ? orangePrefab : yellowPrefab;
+        public Sprite AppearanceSprite(EnemyColor color, bool special = false) =>
+            special || color == EnemyColor.Orange ? SpecialSprite : Prefab(color)?.GetComponentInChildren<SpriteRenderer>()?.sprite;
         public int Level => GetComponent<GameSession>()?.Progress.Level ?? 1;
         public int CurrentRowWidth => RunProgress.RowWidthForLevel(Level);
         public void ApplyAppearance(GridEnemy enemy)
@@ -33,7 +36,7 @@ namespace CandyCruisers
             var prefab = Prefab(enemy.Color);
             if (prefab == null) return;
             var ordinary = prefab.GetComponentInChildren<SpriteRenderer>().sprite;
-            var sprite = enemy.IsSpecial ? SpecialSprite : ordinary;
+            var sprite = AppearanceSprite(enemy.Color, enemy.IsSpecial);
             enemy.Visuals.Body.sprite = sprite;
             enemy.Visuals.Root.localScale = Vector3.one * (ordinary.bounds.size.x / sprite.bounds.size.x);
         }
@@ -251,7 +254,6 @@ namespace CandyCruisers
                 System.Array.Copy(plan, start, row, 0, rowWidth);
                 SpawnPlannedRow(row, start / rowWidth);
             }
-            GetComponent<SoundEffects>()?.PlayCue(SoundEffect.WaveSpawn);
             return true;
         }
 

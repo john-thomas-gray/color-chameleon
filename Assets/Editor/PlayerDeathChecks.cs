@@ -43,13 +43,16 @@ namespace CandyCruisers.Editor
                 Check(!session.CheckPlayerContact() && defeats == 0, "Repeated contact cannot skip the fade or trigger a death cue");
                 session.Tick(session.GameOverBlackoutSeconds);
                 Check(defeats == 1 && player.GetComponentsInChildren<SpriteRenderer>().All(sprite => !sprite.enabled),
-                    "Only after two beats does the game-over cue replace the intact player");
+                    "Only after four beats does the game-over cue replace the intact player");
                 session.Tick(.45f);
                 Check(session.State == GameSession.RunState.Dying, "Game-over overlay stays hidden mid-animation");
                 if (Application.isPlaying)
                 {
-                    var burst = UnityEngine.Object.FindFirstObjectByType<PlayerDeathBurst>();
-                    Check(burst != null && burst.GetComponentsInChildren<SpriteRenderer>().Any(sprite => sprite.enabled), "Placeholder fragments are visible during death");
+                    var cue = (PresentationCue)typeof(GameSession).GetField("deathCue",
+                        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).GetValue(session);
+                    var burst = cue.GetComponentInChildren<PlayerFatalDustBurst>();
+                    Check(burst != null && burst.GetComponentsInChildren<SpriteRenderer>().Any(sprite => sprite.enabled),
+                        "The active fatal death cue displays the player's space dust");
                 }
                 session.Tick(.44f);
                 Check(session.State == GameSession.RunState.Dying, "Game over waits for the whole death animation");
@@ -85,7 +88,7 @@ namespace CandyCruisers.Editor
                 }
                 finally { UnityEngine.Object.DestroyImmediate(custom.gameObject); }
             });
-            Debug.Log("Player death checks passed: two-beat fade before fatal animation, frozen gameplay, no respawn, exactly-once transition and replacement cues.");
+            Debug.Log("Player death checks passed: four-beat fade before fatal animation, frozen gameplay, no respawn, exactly-once transition and replacement cues.");
         }
 
         private static void CheckFatalTiming()
@@ -116,15 +119,16 @@ namespace CandyCruisers.Editor
                     CharacterVisuals.Ensure(player.gameObject).Defeated.AddListener(() => defeats++);
                     typeof(GameSession).GetMethod("BeginPlayerDeath",
                         System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(session, null);
-                    float fade = 2 * 60f / tempo;
+                    float fade = 4 * 60f / tempo;
                     Check(Mathf.Abs(session.GameOverBlackoutSeconds - fade) < .0001f,
-                        "The fade lasts exactly two beats at the fatal hit's current tempo");
+                        "The fade lasts exactly four beats at the fatal hit's current tempo");
                     settings.Update();
                     settings.FindProperty("beatsPerMinute").floatValue = tempo * 2;
                     settings.ApplyModifiedPropertiesWithoutUndo();
                     session.Tick(-1);
                     session.Tick(0);
-                    Check(shatters == 0 && defeats == 0 && session.GameOverBlackoutOpacity == 0 && !music.ShouldPlayMusic,
+                    Check(shatters == 0 && defeats == 0 && session.GameOverBlackoutOpacity == 0 && music.ShouldPlayMusic &&
+                        music.Source.pitch == 1 && session.GameOverMusicGain == 1,
                         "Nonpositive death ticks neither advance the blackout nor release the shatter");
                     float elapsed = 0;
                     while (session.State == GameSession.RunState.Dying)
@@ -138,10 +142,22 @@ namespace CandyCruisers.Editor
                             session.State == GameSession.RunState.GameOver,
                             "Only time beyond the fade boundary advances the death animation, even on long frames");
                         if (elapsed < fade)
+                        {
+                            float opacity = Mathf.SmoothStep(0, 1, elapsed / fade);
+                            Check(Mathf.Abs(session.GameOverBlackoutOpacity - opacity) < .0001f &&
+                                Mathf.Abs(session.GameOverScoreOpacity - (1 - opacity)) < .0001f &&
+                                session.GameOverTitleOpacity == 0,
+                                "Scene and score share the full four-beat fade while the game-over title stays hidden");
                             Check(CharacterVisuals.Ensure(player.gameObject).Body.enabled &&
                                 grid.GetComponentInChildren<FatalImpactBackdrop>() == null,
                                 "The player stays whole and the impact waits during the fade");
-                        Check(!music.Source.isPlaying && music.Source.volume == 0, "Fatal music stays stopped throughout death");
+                        }
+                        if (elapsed < fade)
+                            Check(music.ShouldPlayMusic && music.Source.pitch > 0 && music.Source.pitch < 1 &&
+                                music.Source.volume > 0, "Fatal music slows and fades while the blackout is advancing");
+                        else
+                            Check(!music.ShouldPlayMusic && !music.Source.isPlaying && music.Source.volume == 0,
+                                "Music is silent before the fatal dust and shatter begin");
                     }
                     session.Tick(10);
                     Check(shatters == 1 && defeats == 1 && session.GameOverBlackoutOpacity == 1 &&
@@ -184,7 +200,7 @@ namespace CandyCruisers.Editor
                     "Live art stays hidden during recoverable death");
                 if (Application.isPlaying)
                     Check(UnityEngine.Object.FindObjectsByType<PlayerDeathBurst>(FindObjectsSortMode.None).Any(),
-                        "Recoverable death renders the same burst as fatal contact");
+                        "Recoverable death keeps rendering the ordinary player burst");
                 player.TickSurvival(1.05f);
                 Check(player.Alive && player.Invulnerable && !player.FatallyDefeated,
                     "Normal respawn remains at 1.5 seconds with protection");

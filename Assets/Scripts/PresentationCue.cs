@@ -5,7 +5,7 @@ namespace CandyCruisers
 {
     public sealed class PresentationCue : MonoBehaviour
     {
-        public enum Kind { Fire, Match, Defeat, PlayerDefeat }
+        public enum Kind { Fire, Match, Defeat, PlayerDefeat, PlayerFatalDust }
         [SerializeField, Min(.01f)] private float duration = .5f;
         [SerializeField] private bool tintSprites = true;
         [SerializeField] private GameObject artwork;
@@ -23,6 +23,7 @@ namespace CandyCruisers
         private bool defeatSound;
         private EnemyDeathBurst burst;
         private PlayerDeathBurst playerBurst;
+        private PlayerFatalDustBurst playerFatalDust;
         private LineRenderer ring;
         private UnityEngine.Color tint;
 
@@ -37,7 +38,7 @@ namespace CandyCruisers
             cue.ColorClear = colorClear;
             cue.sounds = source.GetComponentInParent<EnemyGrid>()?.GetComponent<SoundEffects>();
             cue.defeatSound = kind == Kind.Defeat;
-            cue.delay = kind == Kind.Fire ? 0 : (cue.Depth - 1) * EnemyDeathBurst.RingDelay;
+            cue.delay = kind == Kind.Fire || kind == Kind.PlayerFatalDust ? 0 : (cue.Depth - 1) * EnemyDeathBurst.RingDelay;
             cue.tint = EnemyPalette.Get(color);
             if (prefab == null)
             {
@@ -45,6 +46,11 @@ namespace CandyCruisers
                 {
                     cue.playerBurst = PlayerDeathBurst.Create(source, cue.transform, cue.tint);
                     cue.duration = PlayerDeathBurst.Duration;
+                }
+                else if (kind == Kind.PlayerFatalDust)
+                {
+                    cue.playerFatalDust = PlayerFatalDustBurst.Create(source, cue.transform, cue.Depth);
+                    cue.duration = PlayerFatalDustBurst.Duration;
                 }
                 else if (kind == Kind.Defeat)
                 {
@@ -85,6 +91,7 @@ namespace CandyCruisers
                 Started.Invoke();
             }
             if (playerBurst != null) playerBurst.Present(age - delay);
+            if (playerFatalDust != null) playerFatalDust.Present(age - delay);
             if (ring != null)
             {
                 ring.enabled = visible;

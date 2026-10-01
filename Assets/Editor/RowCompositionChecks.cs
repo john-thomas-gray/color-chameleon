@@ -43,7 +43,7 @@ namespace CandyCruisers.Editor
                 Check(orders.Count > 1, "Grouped rows retain randomized composition");
                 var session = root.AddComponent<GameSession>();
                 while (session.Progress.Level < RunProgress.WideRowsStartLevel)
-                    session.Progress.RegisterClear(session.Progress.NextThreshold - session.Progress.Defeated, false);
+                    session.Progress.RegisterClear(session.Progress.NextThreshold - session.Progress.Defeated, true);
                 SpawnOverride.Types = 31;
                 Check(spawner.CurrentRowWidth == RunProgress.WideRowWidth, "Level seven uses six-wide rows");
                 Verify(spawner.PlanBatch(2), SpawnOverride.Types, RunProgress.WideRowWidth);

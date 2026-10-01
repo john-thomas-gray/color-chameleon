@@ -16,8 +16,15 @@ namespace CandyCruisers
         private bool shotActive;
         private readonly HashSet<EnemyColor> shotColors = new HashSet<EnemyColor>();
         public int ScoringComboMultiplier => shotActive ? ActiveComboMultiplier : 1;
-        public int NextThreshold => 9 * Level * (Level + 1);
-        public int PreviousThreshold => 9 * (Level - 1) * Level;
+        public int NextThreshold => NextThresholdForLevel(Level);
+        public int PreviousThreshold => PreviousThresholdForLevel(Level);
+        public int EarnedLevel => LevelForDefeated(Defeated);
+        public bool LevelUpPending => EarnedLevel > Level;
+        public int EarnedPreviousThreshold => PreviousThresholdForLevel(EarnedLevel);
+        public int EarnedNextThreshold => NextThresholdForLevel(EarnedLevel);
+        public float ActiveLevelProgressFraction => FractionBetween(Defeated, PreviousThreshold, NextThreshold);
+        public float BankedLevelProgressFraction => LevelUpPending ?
+            FractionBetween(Defeated, EarnedPreviousThreshold, EarnedNextThreshold) : 0;
         public const int StandardRowWidth = 5;
         public const int WideRowWidth = 6;
         public const int WideRowsStartLevel = 7;
@@ -25,6 +32,14 @@ namespace CandyCruisers
         public int BatchRows => Level <= 2 ? 2 : Level == 3 ? 3 : Level < 4 ? 4 : Level < 7 ? 5 : 6;
         public int BatchEnemies => BatchRows * RowWidth;
         public static int RowWidthForLevel(int level) => level >= WideRowsStartLevel ? WideRowWidth : StandardRowWidth;
+        public static int PreviousThresholdForLevel(int level) => 10 * (Math.Max(MinLevel, level) - 1) * Math.Max(MinLevel, level);
+        public static int NextThresholdForLevel(int level) => 10 * Math.Max(MinLevel, level) * (Math.Max(MinLevel, level) + 1);
+        public static int LevelForDefeated(int defeated)
+        {
+            int level = MinLevel;
+            while (defeated >= NextThresholdForLevel(level)) level++;
+            return level;
+        }
         public static int UnlockLevel(EnemyColor color) =>
             color == EnemyColor.Green ? 2 : color == EnemyColor.Yellow ? 4 : color == EnemyColor.Purple ? 6 : color == EnemyColor.Orange ? 9 : 1;
         public static bool IsUnlocked(EnemyColor color, int level) => level >= UnlockLevel(color);
@@ -45,8 +60,16 @@ namespace CandyCruisers
             if (fleetCleared) earned += 10000L * Level;
             Score += earned;
             Defeated += count;
-            while (Defeated >= NextThreshold) Level++;
+            if (fleetCleared) AdvanceLevelIfEarned();
             return earned;
+        }
+
+        public bool AdvanceLevelIfEarned()
+        {
+            int earned = EarnedLevel;
+            if (earned <= Level) return false;
+            Level = earned;
+            return true;
         }
 
         public void BeginShot()
@@ -78,6 +101,11 @@ namespace CandyCruisers
             ActiveComboMultiplier = 1;
             shotActive = false;
             shotColors.Clear();
+        }
+
+        private static float FractionBetween(int value, int start, int end)
+        {
+            return Math.Max(0, Math.Min(1, (value - start) / (float)Math.Max(1, end - start)));
         }
     }
 }

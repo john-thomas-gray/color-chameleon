@@ -32,6 +32,30 @@ namespace CandyCruisers.Editor
             for (int i = 0; i < majorScale.Length; i++)
                 Check(Mathf.Abs(ColorClearBarAnimation.TonePitch(i + 1) - Mathf.Pow(2, majorScale[i] / 12f)) < .00001f,
                     "Bar notes follow the first six degrees of the major scale");
+            var dim = GameSession.ColorClearBarTint(EnemyColor.Red, false);
+            var powered = GameSession.ColorClearBarTint(EnemyColor.Red, true);
+            Check(dim.a < powered.a && dim.r < powered.r, "Powered-down bars are dimmer and more transparent than lit bars");
+            var high = GameSession.ColorClearBarLevelRect(slot, 0, 0);
+            var low = GameSession.ColorClearBarLevelRect(slot, .25f, 0);
+            var offset = GameSession.ColorClearBarLevelRect(slot, 0, 1);
+            Check(high.height > low.height && Mathf.Abs(high.height - offset.height) > .01f,
+                "Powered bars visualize the beat with staggered level heights");
+
+            SpecialEnemyChecks.Fixture((grid, player, tongue) =>
+            {
+                var spawner = grid.GetComponent<EnemyRowSpawner>();
+                Check(GameSession.ColorClearBarColors(spawner, grid).SequenceEqual(new[] { EnemyColor.Red, EnemyColor.Blue }),
+                    "Level-one bar slots show unlocked colors before any color is seen");
+                ProgressionChecks.Add(grid, EnemyColor.Green, 0, 0);
+                Check(GameSession.ColorClearBarColors(spawner, grid).SequenceEqual(new[] { EnemyColor.Red, EnemyColor.Blue }),
+                    "A locked color does not add a bar slot before its unlock level");
+                var session = grid.gameObject.AddComponent<GameSession>();
+                session.Configure(player);
+                session.Progress.Reset(6);
+                Check(GameSession.ColorClearBarColors(spawner, grid)
+                    .SequenceEqual(new[] { EnemyColor.Red, EnemyColor.Blue, EnemyColor.Green, EnemyColor.Purple, EnemyColor.Yellow }),
+                    "Higher levels show every unlocked color slot, even before that color is cleared");
+            });
 
             SpecialEnemyChecks.Fixture((grid, player, tongue) =>
             {

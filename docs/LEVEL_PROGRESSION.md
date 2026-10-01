@@ -10,21 +10,21 @@ Level is based on cumulative defeated enemies. The next level begins when the
 defeated count reaches:
 
 ```text
-next threshold = 9 * current level * (current level + 1)
+next threshold = 10 * current level * (current level + 1)
 ```
 
 | Level | Defeated enemies required | Next level at |
 | --- | ---: | ---: |
-| 1 | 0 | 18 |
-| 2 | 18 | 54 |
-| 3 | 54 | 108 |
-| 4 | 108 | 180 |
-| 5 | 180 | 270 |
-| 6 | 270 | 378 |
-| 7 | 378 | 504 |
-| 8 | 504 | 648 |
-| 9 | 648 | 810 |
-| 10 | 810 | 990 |
+| 1 | 0 | 20 |
+| 2 | 20 | 60 |
+| 3 | 60 | 120 |
+| 4 | 120 | 200 |
+| 5 | 200 | 300 |
+| 6 | 300 | 420 |
+| 7 | 420 | 560 |
+| 8 | 560 | 720 |
+| 9 | 720 | 900 |
+| 10 | 900 | 1100 |
 
 ## Level-by-Level Changes
 

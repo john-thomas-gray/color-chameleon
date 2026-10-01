@@ -5,15 +5,15 @@
 Missile hits and the last-Yellow transformation penalty use the same replaceable
 player-death cue as fatal contact. Each run starts with the active player plus
 three spare lives. Three miniature players replace the numeric Lives readout;
-their artwork, color and offbeat pulse match the player. After the player's death
-cue finishes, the rightmost spare grows for 0.18 seconds and bursts into fragments
-over 0.32 seconds, then disappears before respawn. The first three deaths spend
-spares; a fourth death ends the run unless a life has been regained. Full reward
-bar sets replenish one spare, capped at three.
+their artwork, color and offbeat pulse match the player. After a recoverable hit,
+the rightmost spare waits one song beat, grows toward center, then bursts into
+fragments before respawn. The first three deaths spend spares; a fourth death ends
+the run unless a life has been regained. Full reward bar sets replenish one spare,
+capped at three.
 
 Normal respawn remains at 1.5 seconds with protection lasting until three seconds
-after the hit. Longer replacement death cues delay the spare animation and retain
-1.5 seconds of protection after respawn. The fleet keeps moving; ordinary pause
+after the hit. Longer replacement death cues can delay respawn, but no longer delay
+the spare-life animation's next-beat entry. The fleet keeps moving; ordinary pause
 also pauses recovery and the spare-life animation. A full enemy row at the player
 still forces game over regardless of spare lives.
 
@@ -365,8 +365,10 @@ colors now upgrade. They retain tier two when the group splits; changing
 color resets the tier until the new group qualifies. Diagonal neighbors and
 Yellow tendrils do not count toward promotion.
 
-Tier-two ships use equilateral triangles pointing downward. `EnemyRowSpawner`'s
-optional `specialSprite` field can replace the procedural placeholder art.
+Tier-two ships use the shared squid sprite assigned on `EnemyRowSpawner`'s
+optional `specialSprite` field.
+Orange always uses that special sprite, including in menu previews, while retaining
+its existing single-tier abilities, cooldowns and hitbox; it does not need promotion.
 Special Purple adds forward-row summons, including the bottom row. Special Yellow uses a visual-only
 disguise instead of ordinary linked transformation, as detailed above.
 
@@ -444,11 +446,13 @@ remain live during phase-in. The centralized spawn path triggers the effect for
 opening fleets, ordinary rows, refills, and summons without duplicate triggers.
 
 The last hit no longer cancels the tongue. It retracts visibly while the fleet
-is paused, and the earned bars run out at one current-song beat per bar. Removing
-the last bar leaves the field empty and holds the player's final color; the next
-fleet starts on the following music beat, never on the bar-removal update. With
-no active music, this gap lasts one beat at the current tempo. Pause also freezes
-the gap. Player movement remains active, but firing into an empty field is blocked.
+is paused, and the earned bars divide the available current-song beats before
+the next eligible spawn downbeat. Removing the last regular bar leaves the field
+empty and holds the player's final color for the reserved beat before the next
+fleet starts; earned-life clears reserve an additional beat for the life pulse.
+With no active music, the bars divide one beat at the current tempo. Pause also
+freezes the gap. Player movement remains active, but firing into an empty field
+is blocked.
 
 At fleet clear, the spawner prepares the exact next batch using the new level
 and current override. The player keeps the outgoing shot color until the tongue

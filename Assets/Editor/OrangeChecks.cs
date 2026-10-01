@@ -29,6 +29,7 @@ namespace CandyCruisers.Editor
         }
         public static void Run()
         {
+            CheckSpecialAppearance();
             Check(!RunProgress.IsUnlocked(EnemyColor.Orange, 8) && RunProgress.IsUnlocked(EnemyColor.Orange, 9), "Orange unlocks at nine");
             var model = new GridModel();
             Check(model.TryAdd(1, EnemyColor.Orange, 0, 0), "Add first Orange");
@@ -57,6 +58,8 @@ namespace CandyCruisers.Editor
                 Check(grid.Model.ColorGroup(neighbor.Id).Count == 2 && !orange.IsSpecial, "Swap joins the matching group without upgrading Orange");
                 Check(target.transform.localPosition == grid.CellPosition(0, 1) && orange.transform.localPosition == grid.CellPosition(4, 0), "Views follow swapped cells");
                 Check(target.GetComponent<EnemyPresentation>().IsPhasing && orange.GetComponent<EnemyPresentation>().IsPhasing, "Both swap endpoints animate");
+                Check(orange.Visuals.Body.sprite == grid.GetComponent<EnemyRowSpawner>().SpecialSprite,
+                    "Orange keeps its special sprite through its swap animation");
             });
             SpecialEnemyChecks.Fixture((grid, player, tongue) =>
             {
@@ -84,6 +87,8 @@ namespace CandyCruisers.Editor
                 ability.Tick(EnemyAbilities.ImitationSeconds);
                 Check(ability.IsDisguised && yellow.Color == EnemyColor.Yellow && grid.Model.ColorCount(EnemyColor.Orange) == 1,
                     "Disguised Yellow remains logically Yellow beside Orange");
+                Check(yellow.Visuals.Body.sprite == grid.GetComponent<EnemyRowSpawner>().SpecialSprite &&
+                    yellow.Visuals.Body.sprite == orange.Visuals.Body.sprite, "A Yellow disguised as Orange copies its special appearance");
                 Check(ability.RevealDisguise(EnemyColor.Red) && yellow.Color == EnemyColor.Yellow, "Orange disguise reveals normally");
             });
             foreach (int oranges in new[] { 2, 3 })
@@ -140,7 +145,55 @@ namespace CandyCruisers.Editor
             }
             finally { SpawnOverride.Enabled = enabled; SpawnOverride.Types = types; }
             CheckRareSpawns();
-            Debug.Log("Orange checks passed: unlock, isolation, matching-singleton swaps, pause, Yellow rules, retreat bonus and spawn paths.");
+            Debug.Log("Orange checks passed: always-special appearance, stable hitboxes, unlock, isolation, matching-singleton swaps, pause, Yellow rules, retreat bonus and spawn paths.");
+        }
+        private static void CheckSpecialAppearance()
+        {
+            SpecialEnemyChecks.Fixture((grid, player, tongue) =>
+            {
+                var spawner = grid.GetComponent<EnemyRowSpawner>();
+                foreach (EnemyColor color in Enum.GetValues(typeof(EnemyColor)))
+                {
+                    var ordinary = spawner.Prefab(color).GetComponentInChildren<SpriteRenderer>().sprite;
+                    Check(spawner.AppearanceSprite(color) == (color == EnemyColor.Orange ? spawner.SpecialSprite : ordinary) &&
+                        spawner.AppearanceSprite(color, true) == spawner.SpecialSprite,
+                        "Gameplay and menu previews share Orange's always-special sprite without changing other colors");
+                }
+                var orange = Add(grid, EnemyColor.Orange, 2, 1);
+                var bounds = orange.HitBounds;
+                var body = orange.Visuals.Body;
+                var ordinaryOrange = spawner.Prefab(EnemyColor.Orange).GetComponentInChildren<SpriteRenderer>().sprite;
+                Check(body.sprite == spawner.SpecialSprite && !orange.IsSpecial && orange.Tier == 1 &&
+                    Mathf.Abs(body.bounds.size.x - ordinaryOrange.bounds.size.x * orange.transform.lossyScale.x) < .0001f,
+                    "Orange starts with special artwork at its normal width without changing its gameplay tier");
+                var ability = orange.GetComponent<EnemyAbilities>();
+                foreach (bool warp in new[] { false, true })
+                {
+                    ability.BeginSpawnEffect(null, warp);
+                    foreach (float age in new[] { 0f, .4f, .4f })
+                    {
+                        ability.Tick(age);
+                        Check(body.sprite == spawner.SpecialSprite && orange.HitBounds == bounds,
+                            "Orange keeps special artwork and its authored hitbox throughout growth and warp arrivals");
+                    }
+                }
+                Check(grid.SetColor(orange.Id, EnemyColor.Red) && body.sprite == spawner.AppearanceSprite(EnemyColor.Red),
+                    "Changing away from Orange restores the destination color's regular sprite");
+                Check(grid.SetColor(orange.Id, EnemyColor.Orange) && body.sprite == spawner.SpecialSprite,
+                    "Changing to Orange immediately applies the special sprite");
+                grid.RefreshSpecials();
+                Check(!orange.IsSpecial && body.sprite == spawner.SpecialSprite && orange.HitBounds == bounds,
+                    "Promotion refresh preserves Orange's appearance without promoting it");
+                var replacement = player.GetComponentInChildren<SpriteRenderer>().sprite;
+                spawner.ConfigureSpecialSprite(replacement);
+                spawner.ApplyAppearance(orange);
+                Check(body.sprite == replacement && orange.HitBounds == bounds,
+                    "Orange follows the configured special artwork without changing collision bounds");
+                spawner.ConfigureSpecialSprite(null);
+                spawner.ApplyAppearance(orange);
+                Check(body.sprite == EnemyPlaceholderArt.Triangle && orange.HitBounds == bounds,
+                    "Orange uses the same special-art fallback when no custom sprite is configured");
+            });
         }
         private static void CheckRareSpawns()
         {
@@ -161,6 +214,7 @@ namespace CandyCruisers.Editor
                         if (spawned == null) continue;
                         oranges++;
                         Check(spawned.Color == EnemyColor.Orange, "Orange-only override never substitutes other types");
+                        Check(spawned.Visuals.Body.sprite == spawner.SpecialSprite, "Rare summoned Orange arrives with special artwork");
                         Check(spawner.TrySummon(purple) == null, "An existing Orange prevents a second summon");
                         grid.Unregister(spawned); UnityEngine.Object.DestroyImmediate(spawned.gameObject);
                     }
@@ -183,7 +237,11 @@ namespace CandyCruisers.Editor
             Check(grid.Model.ColorCount(EnemyColor.Orange) <= 1, "Spawn paths enforce one Orange on screen");
             foreach (var enemy in grid.GetComponentsInChildren<GridEnemy>())
                 if (enemy.Color == EnemyColor.Orange)
+                {
                     Check(!grid.Model.HasOrangeNeighbor(enemy.Column, enemy.Row), "No adjacent Oranges after spawning");
+                    Check(enemy.Visuals.Body.sprite == grid.GetComponent<EnemyRowSpawner>().SpecialSprite,
+                        "Every Orange uses special artwork across batch, row and summon spawn paths");
+                }
         }
         private static GridEnemy Add(EnemyGrid grid, EnemyColor color, int x, int y) => ProgressionChecks.Add(grid, color, x, y);
         private static void Check(bool value, string message)

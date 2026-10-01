@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace CandyCruisers
@@ -9,21 +10,34 @@ namespace CandyCruisers
         public const float DrainSeconds = ComboBreakAnimation.DrainSeconds;
         public const float SlashSeconds = ComboBreakAnimation.SlashSeconds;
         public const float SplitSeconds = ComboBreakAnimation.SplitSeconds;
+        public const float DefaultStartDelay = FullSetCelebration.StepDuration;
         public const float GrowthSeconds = TravelSeconds;
         public const float BurstSeconds = SplitSeconds;
         public const float Duration = TravelSeconds + DrainSeconds + SlashSeconds + SplitSeconds;
         public const int FragmentCount = 12;
+        private const int LayoutSlots = 3;
         public int ConsumedSlot { get; private set; } = -1;
         public bool Active => ConsumedSlot >= 0;
+        public PlayerLifeGainAnimation Gain { get; } = new PlayerLifeGainAnimation();
+        private readonly List<int> pendingGains = new List<int>();
+        private readonly HashSet<int> reservedGains = new HashSet<int>();
+        public bool Animating => Active || Gain.Active || pendingGains.Count > 0 || reservedGains.Count > 0;
         public bool Started { get; private set; }
         public float Age { get; private set; }
-        public float RemainingSeconds => Active ? Mathf.Max(0, Duration - Age) : 0;
-        public float TravelProgress => Started ? Mathf.Clamp01(Age / TravelSeconds) : 0;
-        public float DrainProgress => Mathf.Clamp01((Age - TravelSeconds) / DrainSeconds);
-        public float SlashProgress => Mathf.Clamp01((Age - TravelSeconds - DrainSeconds) / SlashSeconds);
-        public float SlashOpacity => Active && Age >= TravelSeconds + DrainSeconds ?
-            1 - Mathf.Clamp01((Age - TravelSeconds - DrainSeconds - SlashSeconds) / .14f) : 0;
-        public float SplitProgress => Mathf.Clamp01((Age - TravelSeconds - DrainSeconds - SlashSeconds) / SplitSeconds);
+        private bool timingPrepared;
+        private AudioClip musicClip;
+        private float musicSeconds;
+        private float travelStartsAt;
+        private float travelEndsAt = TravelSeconds;
+        private float slashStartsAt = TravelSeconds + DrainSeconds;
+        public float PlaybackDuration => slashStartsAt + SlashSeconds + SplitSeconds;
+        public float RemainingSeconds => Active ? Mathf.Max(0, PlaybackDuration - Age) : 0;
+        public float TravelProgress => Started ? Mathf.Clamp01((Age - travelStartsAt) / TravelSeconds) : 0;
+        public float DrainProgress => Mathf.Clamp01((Age - travelEndsAt) / Mathf.Max(.0001f, slashStartsAt - travelEndsAt));
+        public float SlashProgress => Mathf.Clamp01((Age - slashStartsAt) / SlashSeconds);
+        public float SlashOpacity => Active && Age >= slashStartsAt ?
+            1 - Mathf.Clamp01((Age - slashStartsAt - SlashSeconds) / .14f) : 0;
+        public float SplitProgress => Mathf.Clamp01((Age - slashStartsAt - SlashSeconds) / SplitSeconds);
         public float Opacity => Active ? 1 - SplitProgress * SplitProgress : 0;
         public float GrowthScale => Mathf.Lerp(1, 3, Mathf.SmoothStep(0, 1, TravelProgress));
         public float BurstProgress => SplitProgress;
@@ -32,18 +46,104 @@ namespace CandyCruisers
 
         public void BeginLoss(int slot)
         {
-            Reset();
-            if (slot >= 0 && slot < PlayerMovement.MaxExtraLives) ConsumedSlot = slot;
+            ResetLoss();
+            if (slot < 0 || slot >= PlayerMovement.MaxExtraLives) return;
+            ConsumedSlot = slot;
+            pendingGains.RemoveAll(pending => pending >= slot);
+            reservedGains.RemoveWhere(reserved => reserved >= slot);
+            // A death takes centerstage; any still-owned reward can enter after the loss finishes.
+            if (Gain.Active && Gain.Slot < slot) pendingGains.Insert(0, Gain.Slot);
+            Gain.Reset();
         }
 
-        public void Reset() { ConsumedSlot = -1; Age = 0; Started = false; }
+        public void Reset()
+        {
+            ResetLoss();
+            Gain.Reset();
+            pendingGains.Clear();
+            reservedGains.Clear();
+        }
 
-        public void Tick(float seconds)
+        public void BeginGain(int slot, GameplayMusicPlayer music = null)
+        {
+            if (slot < 0 || slot >= PlayerMovement.MaxExtraLives || IsGainPending(slot)) return;
+            pendingGains.Add(slot);
+            StartNextGain(music);
+        }
+
+        public void ReserveGain(int slot)
+        {
+            if (slot >= 0 && slot < PlayerMovement.MaxExtraLives && !IsGainPending(slot)) reservedGains.Add(slot);
+        }
+
+        public void ReleaseGain(int slot, GameplayMusicPlayer music = null, float? appearanceBeat = null)
+        {
+            if (!reservedGains.Remove(slot)) return;
+            if (Active || Gain.Active || pendingGains.Count > 0) BeginGain(slot, music);
+            else Gain.Begin(slot, music, appearanceBeat);
+        }
+
+        public bool IsGainPending(int slot) => Gain.Active && Gain.Slot == slot ||
+            pendingGains.Contains(slot) || reservedGains.Contains(slot);
+
+        private void StartNextGain(GameplayMusicPlayer music)
+        {
+            if (Active || Gain.Active || pendingGains.Count == 0) return;
+            int slot = pendingGains[0];
+            pendingGains.RemoveAt(0);
+            Gain.Begin(slot, music);
+        }
+
+        private void ResetLoss()
+        {
+            ConsumedSlot = -1; Age = 0; Started = false;
+            timingPrepared = false;
+            musicClip = null;
+            travelStartsAt = DefaultStartDelay;
+            travelEndsAt = DefaultStartDelay + TravelSeconds;
+            slashStartsAt = DefaultStartDelay * 2;
+        }
+
+        public void Tick(float seconds, GameplayMusicPlayer music = null)
+        {
+            TickLoss(seconds, music);
+            Gain.Tick(seconds, music);
+            StartNextGain(music);
+        }
+
+        private void TickLoss(float seconds, GameplayMusicPlayer music)
         {
             if (!Active) return;
-            Started = true;
-            Age = Mathf.Min(Duration, Age + Mathf.Max(0, seconds));
-            if (Age >= Duration) Reset();
+            seconds = Mathf.Max(0, seconds);
+            if (!timingPrepared)
+            {
+                timingPrepared = true;
+                if (music != null && music.Source.isPlaying && music.Source.clip != null)
+                {
+                    musicClip = music.Source.clip;
+                    musicSeconds = music.PlaybackSeconds;
+                    // The first tick is measured from the hit frame: the spent spare enters on the next beat.
+                    float began = musicSeconds - seconds;
+                    float startBeat = Mathf.Floor(music.BeatPositionAtTime(began)) + 1;
+                    travelStartsAt = Mathf.Max(0, music.SecondsAtBeat(startBeat) - began);
+                    travelEndsAt = travelStartsAt + TravelSeconds;
+                    slashStartsAt = Mathf.Max(travelEndsAt + .0001f, music.SecondsAtBeat(startBeat + 1) - began);
+                }
+            }
+            else if (musicClip != null)
+            {
+                if (music != null && music.Source.clip == musicClip && music.Source.isPlaying &&
+                    music.PlaybackSeconds >= musicSeconds)
+                {
+                    float now = music.PlaybackSeconds;
+                    seconds = now - musicSeconds;
+                    musicSeconds = now;
+                }
+                else musicClip = null;
+            }
+            Age = Mathf.Min(PlaybackDuration, Age + seconds);
+            Started = Age >= travelStartsAt;
+            if (Age >= PlaybackDuration) ResetLoss();
         }
 
         public static float BeatScale(float beat) => 1 + .09f * GameplayMusicPlayer.BeatPulse(beat, true);
@@ -51,7 +151,7 @@ namespace CandyCruisers
         public static Rect RowRect(float x, float y, int viewHeight)
         {
             float size = viewHeight < 400 ? 10 : viewHeight < 600 ? 14 : 18;
-            float center = viewHeight < 400 ? 28 : viewHeight < 600 ? 34 : 50;
+            float center = viewHeight < 400 ? 33 : viewHeight < 600 ? 38 : 50;
             return new Rect(x + 2, y + center - size / 2, 96, size);
         }
 
@@ -59,9 +159,10 @@ namespace CandyCruisers
 
         public static Rect IconRect(Rect row, int slot, float scale = 1)
         {
-            float cell = row.width / PlayerMovement.MaxExtraLives;
-            float size = Mathf.Min(20, Mathf.Min(row.height, cell - 8)) * scale;
-            var center = new Vector2(row.x + cell * (slot + .5f), row.center.y);
+            float cell = row.width / LayoutSlots;
+            float size = Mathf.Min(20, Mathf.Min(row.height, cell - 8));
+            var center = new Vector2(row.x + cell * .5f + slot * (size + 4), row.center.y);
+            size *= scale;
             return new Rect(center.x - size / 2, center.y - size / 2, size, size);
         }
 
@@ -113,10 +214,14 @@ namespace CandyCruisers
             {
                 bool consuming = Active && slot == ConsumedSlot;
                 if (!consuming && slot >= player.ExtraLives) continue;
+                if (!consuming && IsGainPending(slot)) continue;
                 if (consuming && Started)
                     DrawBreakingPlayer(IconRect(row, slot), visuals.Body, player.DisplayColor, opacity, screenWidth, screenHeight);
                 else DrawPlayer(IconRect(row, slot, beat), visuals.Body, player.DisplayColor, opacity);
             }
+            if (Gain.Visible)
+                DrawPlayer(Gain.DisplayRect(IconRect(row, Gain.Slot), screenWidth, screenHeight),
+                    visuals.Body, player.DisplayColor, opacity * Gain.Opacity);
         }
 
         private void DrawPlayer(Rect rect, SpriteRenderer body, Color color, float opacity, bool drainAll = false)
@@ -143,9 +248,9 @@ namespace CandyCruisers
         private void DrawBreakingPlayer(Rect resting, SpriteRenderer body, Color color, float opacity,
             float screenWidth, float screenHeight)
         {
-            var rect = LossDisplayRect(resting, screenWidth, screenHeight, Age);
+            var rect = LossDisplayRect(resting, screenWidth, screenHeight, Age - travelStartsAt);
             float alpha = opacity * Opacity;
-            if (Age < TravelSeconds + DrainSeconds + SlashSeconds)
+            if (Age < slashStartsAt + SlashSeconds)
                 DrawPlayer(rect, body, color, alpha, true);
             else
             {
@@ -192,12 +297,12 @@ namespace CandyCruisers
         private static void DrawSprite(Rect rect, Sprite sprite, Color tint)
         {
             if (sprite == null || sprite.texture == null) return;
-            var previous = GUI.color;
-            GUI.color = tint;
             var texture = sprite.texture;
             var source = sprite.rect;
-            GUI.DrawTextureWithTexCoords(rect, texture,
-                new Rect(source.x / texture.width, source.y / texture.height, source.width / texture.width, source.height / texture.height), true);
+            var previous = GUI.color;
+            GUI.color = tint;
+            GUI.DrawTextureWithTexCoords(rect, texture, new Rect(source.x / texture.width,
+                source.y / texture.height, source.width / texture.width, source.height / texture.height), true);
             GUI.color = previous;
         }
     }

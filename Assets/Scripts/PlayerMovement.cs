@@ -232,12 +232,12 @@ namespace CandyCruisers
             ShowPlayer(true);
         }
 
-        public PresentationCue BeginFatalDefeat()
+        public PresentationCue BeginFatalDefeat(int level = RunProgress.MinLevel)
         {
             if (fatalAnimationStarted) return null;
             PrepareFatalDefeat();
             fatalAnimationStarted = true;
-            var cue = CharacterVisuals.Ensure(gameObject).PlayerDefeat(ReadyColor ?? EnemyColor.Blue);
+            var cue = CharacterVisuals.Ensure(gameObject).PlayerFatalDefeat(ReadyColor ?? EnemyColor.Blue, level);
             ShowPlayer(false);
             return cue;
         }
@@ -265,10 +265,11 @@ namespace CandyCruisers
             RefreshColor(true);
         }
 
-        public bool GrantLife()
+        public bool GrantLife(bool animate = true)
         {
             if (Lives >= MaxLives || FatallyDefeated) return false;
             Lives++;
+            if (animate) LifeIcons.BeginGain(ExtraLives - 1, Music);
             grid?.GetComponent<SoundEffects>()?.PlayCue(SoundEffect.OneUp);
             return true;
         }
@@ -304,18 +305,16 @@ namespace CandyCruisers
         public void TickSurvival(float seconds)
         {
             if (FatallyDefeated || grid != null && grid.GetComponent<GameSession>()?.IsPaused == true) return;
-            if (recoveryRemaining <= 0 && !awaitingRespawn && !LifeIcons.Active && (recoveryCue == null || recoveryCue.Finished)) return;
+            if (recoveryRemaining <= 0 && !awaitingRespawn && !LifeIcons.Animating && (recoveryCue == null || recoveryCue.Finished)) return;
             seconds = Mathf.Max(0, seconds);
             bool wasAlive = Alive;
             float deathRemaining = recoveryCue != null ? recoveryCue.RemainingSeconds :
                 Mathf.Max(0, PlayerDeathBurst.Duration - recoveryElapsed);
-            // Finish the player's death before starting the spent-spare animation, including long frames and replacement cues.
             if (awaitingRespawn)
                 recoveryRemaining = Mathf.Max(recoveryRemaining, deathRemaining + 1.5f);
+            LifeIcons.Tick(seconds, Music);
             if (recoveryCue != null) recoveryCue.Tick(seconds);
             recoveryElapsed += seconds;
-            if (recoveryCue != null ? recoveryCue.Finished : recoveryElapsed >= PlayerDeathBurst.Duration)
-                LifeIcons.Tick(Mathf.Max(0, seconds - deathRemaining));
             recoveryRemaining = Mathf.Max(0, recoveryRemaining - seconds);
             if (awaitingRespawn && recoveryRemaining <= 1.5f && (recoveryCue == null || recoveryCue.Finished))
             {

@@ -790,6 +790,12 @@ reference for individual rules and original limitations.
 - [x] Render multicolored spacedust as soft round shimmering glints, retaining visible brightness and size until absorption at the player.
 - [x] Randomize spacedust sizes independently of gameplay randomness; use the same shimmering glints for player death fragments and the game-over colored burst.
 - [x] Start the missed-shot combo-break animation when the tongue begins retracting, without replaying it on arrival.
+- [x] Use cumulative level thresholds of 10 * level * (level + 1), beginning with 20 defeated enemies for level two.
+- [x] Pulse the solid progress fill in size on the music beat while a level-up is banked until the fleet clears; keep the overfill strip aligned.
+- [x] Keep score/level text above life artwork and reserve compact-layout clearance for pulsing lives and progress fill.
+- [x] Shift the shared refill measure anchor one beat later, independently of individual-beat timing, to correct the reported beat-four spawn alignment.
+- [x] Add a 100-measure spoken counting metronome at Disco Descent's 115.03 beats per minute, with an explicit downbeat on "one" and F9 developer selection.
+- [x] Let the refill hold shorten to fit the earliest available downbeat; a one-bar full set cleared on beat one spawns on the next measure's downbeat, including small frame delays.
 - [x] Schedule enemy ability cooldowns in randomized whole beats against the playing song's beat map; Green and Orange windups finish on beats. Track changes and seeks retain pending beat intervals.
 - [x] Animate each earned color bar from an oversized raised position into its resting slot.
 - [x] Play ascending reward tones for successive earned bars; reset pitch when the bar sequence is lost or a new wave begins.

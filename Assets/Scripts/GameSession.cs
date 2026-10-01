@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -7,19 +8,17 @@ namespace CandyCruisers
     public sealed class GameSession : MonoBehaviour
     {
         public enum RunState { Playing, Refilling, GameOver, MainMenu, Dying }
-        public const float GameOverBlackoutBeats = 2;
+        public const float GameOverBlackoutBeats = 4;
         public float GameOverBlackoutSeconds { get; private set; } = GameOverBlackoutBeats * FullSetCelebration.StepDuration;
-        public const float GameOverModalDelay = .2f;
-        public const float GameOverModalFadeSeconds = .65f;
+        public const float GameOverTitleFadeSeconds = .65f;
         private float gameOverElapsed;
-        public float GameOverMusicGain => State == RunState.Dying || State == RunState.GameOver ? 0 : 1;
+        public float GameOverMusicGain => 1 - GameOverBlackoutOpacity;
         public float GameOverBlackoutOpacity => State == RunState.GameOver ? 1 : State == RunState.Dying ?
             Mathf.SmoothStep(0, 1, deathElapsed / GameOverBlackoutSeconds) : 0;
-        public float GameOverModalOpacity => State == RunState.GameOver ?
-            Mathf.SmoothStep(0, 1, (gameOverElapsed - GameOverModalDelay) / GameOverModalFadeSeconds) : 0;
+        public float GameOverTitleOpacity => State == RunState.GameOver ?
+            Mathf.SmoothStep(0, 1, gameOverElapsed / GameOverTitleFadeSeconds) : 0;
         public float GameOverScoreOpacity => 1 - GameOverBlackoutOpacity;
-        public bool GameOverMenuReady => State == RunState.GameOver &&
-            gameOverElapsed >= GameOverModalDelay + GameOverModalFadeSeconds;
+        public bool GameOverTitleReady => State == RunState.GameOver && gameOverElapsed >= GameOverTitleFadeSeconds;
         private PresentationCue deathCue;
         private bool hasDeathCue;
         private float deathElapsed;
@@ -48,6 +47,9 @@ namespace CandyCruisers
         private SoundEffects soundEffects;
         private GameplayMusicPlayer musicPlayer;
         private float refillRemaining;
+        private AudioClip refillMusicClip;
+        private float refillMusicSeconds;
+        private float refillSpawnSeconds;
         private EnemyColor[] nextBatch;
         private bool restarting;
         private bool leaderboardRecorded;
@@ -66,6 +68,7 @@ namespace CandyCruisers
         public Color ProgressBarColor => player != null ? player.DisplayColor : Color.gray;
         public const float ComboMilestoneAnimationSeconds = 1.1f;
         public const float ComboMilestonePulseSeconds = .45f;
+        public const float ComboDeathFadeSeconds = .5f;
         public const float LargePhoneGuiScale = 2f;
         public const float MediumPhoneGuiScale = 1.6f;
         public const float SmallPhoneGuiScale = 1.35f;
@@ -73,6 +76,11 @@ namespace CandyCruisers
         private int comboMilestoneMultiplier;
         private float comboMilestoneElapsed = ComboMilestoneAnimationSeconds;
         public ComboBreakAnimation ComboBreak { get; } = new ComboBreakAnimation();
+        private float comboDeathFadeElapsed = ComboDeathFadeSeconds;
+        public int ComboDeathMultiplier { get; private set; }
+        public Color ComboDeathColor { get; private set; } = Color.white;
+        public float ComboDeathOpacity => ComboDeathMultiplier > 1 ?
+            1 - Mathf.SmoothStep(0, 1, comboDeathFadeElapsed / ComboDeathFadeSeconds) : 0;
         public Color ComboColor { get; private set; } = Color.white;
         public Font ComboFont => Resources.Load<Font>("Fonts/Bungee-Regular");
         private bool accumulatingShotScore;
@@ -92,6 +100,9 @@ namespace CandyCruisers
         private readonly ColorClearBarAnimation clearBarAnimation = new ColorClearBarAnimation();
         public FullSetCelebration ClearCelebration { get; } = new FullSetCelebration();
         private bool partialClearCelebration;
+        private int rewardedLifeSlot = -1;
+        private int refillPostBarBeats = 1;
+        private float? refillRewardBeat;
         private int removedBarCount;
         private void OnCelebrationColorRemoved(EnemyColor color)
         {
@@ -139,8 +150,11 @@ namespace CandyCruisers
                     if (RunProgress.UnlockLevel(color) > before && RunProgress.UnlockLevel(color) <= Progress.Level)
                         feedback += "  /  " + color + " unlocked";
             }
-            if (grid != null && grid.AllColorClearBarsFilled && player != null && player.GrantLife())
+            if (grid != null && grid.AllColorClearBarsFilled && player != null && player.GrantLife(false))
+            {
+                rewardedLifeSlot = player.ExtraLives - 1;
                 feedback += "  /  +1 Life";
+            }
             feedbackRemaining = 3f;
         }
 
@@ -180,6 +194,7 @@ namespace CandyCruisers
             Progress.Reset(StartLevel);
             accumulatingShotScore = false;
             feedbackRemaining = 0;
+            rewardedLifeSlot = -1;
             ResetComboPresentation();
             if (player != null) player.ResetForRun();
             State = RunState.Playing;
@@ -316,8 +331,7 @@ namespace CandyCruisers
 
         private void OnPlayerHit()
         {
-            Progress.ResetCombo();
-            ObserveComboStreak();
+            FadeComboOnDeath();
         }
 
         private void Update()
@@ -325,6 +339,8 @@ namespace CandyCruisers
             if (IsPaused || State == RunState.MainMenu || State == RunState.GameOver)
                 foreach (var touch in Input.touches)
                     if (touch.phase == TouchPhase.Ended && ActivateMenuTouch(touch.position)) return;
+            if (State == RunState.GameOver && Input.touchCount == 0 && Input.GetMouseButtonUp(0) &&
+                ActivateMenuTouch(Input.mousePosition)) return;
             foreach (var key in MenuKeys)
                 if (Input.GetKeyDown(key) && HandleMenuKey(key)) return;
             Tick(State == RunState.GameOver || State == RunState.Dying ? Time.unscaledDeltaTime : Time.deltaTime);
@@ -339,7 +355,7 @@ namespace CandyCruisers
 
         public bool HandleMenuKey(KeyCode key)
         {
-            if (State == RunState.Dying || State == RunState.GameOver && !GameOverMenuReady) return false;
+            if (State == RunState.Dying || State == RunState.GameOver && !GameOverTitleReady) return false;
             if (DeveloperOptions.Available && key == KeyCode.I)
             {
                 TogglePlayerInvincible();
@@ -391,11 +407,9 @@ namespace CandyCruisers
             point = FlipGuiY(ToGuiPoint(point));
             if (State == RunState.GameOver)
             {
-                if (!GameOverMenuReady) return false;
-                var panel = GameOverModalRect(GuiWidth, GuiHeight);
-                if (GameOverRestartRect(panel).Contains(point)) { Restart(); return true; }
-                if (GameOverMainMenuRect(panel).Contains(point)) { ReturnToMenu(); return true; }
-                return false;
+                if (!GameOverTitleReady) return false;
+                ReturnToMenu();
+                return true;
             }
             float width = MenuWidth;
             float x = (GuiWidth - width) / 2, y = MenuAnchorY(State == RunState.MainMenu);
@@ -431,6 +445,7 @@ namespace CandyCruisers
             {
                 float previousAnimationAge = Mathf.Max(0, deathElapsed - GameOverBlackoutSeconds);
                 deathElapsed += Mathf.Max(0, seconds);
+                musicPlayer?.UpdatePlayback();
                 if (deathElapsed < GameOverBlackoutSeconds)
                 {
                     blackout?.Present(GameOverBlackoutOpacity);
@@ -439,12 +454,15 @@ namespace CandyCruisers
                 if (!deathAnimationStarted)
                 {
                     deathAnimationStarted = true;
-                    deathCue = player.BeginFatalDefeat();
+                    blackout?.Present(1);
+                    deathCue = player.BeginFatalDefeat(Progress.Level);
                     hasDeathCue = deathCue != null;
+                    Vector3 impactPosition = deathCue != null ? deathCue.transform.position :
+                        CharacterVisuals.Ensure(player.gameObject).Body.transform.position;
                     // The session owns cue time, including the remainder of a frame crossing the fade boundary.
                     if (deathCue != null) deathCue.enabled = false;
                     blackout.ShowDeath(deathCue);
-                    blackout.BeginImpact(player.transform.position, Progress.Level);
+                    blackout.BeginImpact(impactPosition, Progress.Level);
                 }
                 float animationAge = Mathf.Max(0, deathElapsed - GameOverBlackoutSeconds);
                 blackout?.Present(GameOverBlackoutOpacity, animationAge);
@@ -460,22 +478,51 @@ namespace CandyCruisers
             if (CheckPlayerContact()) return;
             feedbackRemaining = Mathf.Max(0, feedbackRemaining - Mathf.Max(0, seconds));
             if (State != RunState.Refilling) return;
+            float celebrationSeconds = Mathf.Max(0, seconds);
+            bool musicTimed = refillMusicClip != null && musicPlayer != null &&
+                musicPlayer.Source.clip == refillMusicClip && musicPlayer.Source.isPlaying &&
+                musicPlayer.PlaybackSeconds >= refillMusicSeconds;
+            if (musicTimed)
+            {
+                float now = musicPlayer.PlaybackSeconds;
+                celebrationSeconds = now - refillMusicSeconds;
+                refillMusicSeconds = now;
+            }
+            else if (refillMusicClip != null)
+            {
+                // A stopped, replaced or rewound song releases the old clock without stalling the wave.
+                refillMusicClip = null;
+                if (ClearCelebration.Finished) refillRemaining = refillPostBarBeats * CurrentBeatDuration;
+            }
             if (ClearCelebration.Active)
             {
                 bool wasFinished = ClearCelebration.Finished;
-                ClearCelebration.Tick(seconds);
+                ClearCelebration.Tick(celebrationSeconds);
                 player.SetCelebrationColor(ClearCelebration.Color);
                 if (!ClearCelebration.Finished) return;
                 if (!wasFinished)
                 {
-                    // Keep the final bar-removal frame empty; spawn on the following music beat.
-                    refillRemaining = musicPlayer != null && musicPlayer.Source.isPlaying ?
-                        musicPlayer.SecondsToNextBeat : CurrentBeatDuration;
+                    // An earned life uses the intervening beat before the planned downbeat.
+                    if (rewardedLifeSlot >= 0)
+                    {
+                        player.LifeIcons.ReleaseGain(rewardedLifeSlot, musicPlayer, musicTimed ? refillRewardBeat : null);
+                        rewardedLifeSlot = -1;
+                    }
+                    if (!musicTimed) refillRemaining = musicPlayer != null && musicPlayer.Source.isPlaying ?
+                        musicPlayer.SecondsAtBeat(Mathf.Floor(musicPlayer.BeatPosition) + refillPostBarBeats) -
+                            musicPlayer.PlaybackSeconds : refillPostBarBeats * CurrentBeatDuration;
                     return;
                 }
             }
-            refillRemaining -= Mathf.Max(0, seconds);
-            if (refillRemaining > 0) return;
+            if (musicTimed)
+            {
+                if (refillMusicSeconds < refillSpawnSeconds) return;
+            }
+            else
+            {
+                refillRemaining -= Mathf.Max(0, seconds);
+                if (refillRemaining > 0) return;
+            }
             if (ClearCelebration.Active) player.FinishWaveReturn();
             else if (player.ShotActive || grid.HasDeathEffects) return;
             movement.ResetSweep();
@@ -489,6 +536,7 @@ namespace CandyCruisers
             Suspend(false);
             grid.RefreshSpecials();
             ClearCelebration.Reset();
+            refillMusicClip = null;
             player.SetCelebrationColor(null);
             player.RefreshColor();
             WaveSpawned?.Invoke();
@@ -500,16 +548,57 @@ namespace CandyCruisers
             if (State == RunState.Playing)
             {
                 partialClearCelebration = !grid.AllColorClearBarsFilled;
+                refillPostBarBeats = rewardedLifeSlot >= 0 ? 2 : 1;
+                refillRewardBeat = null;
                 removedBarCount = 0;
                 var colors = grid.SeenColors();
                 var earned = colors.FindAll(grid.HasColorClearBar);
-                float refillDuration = FullSetCelebration.DurationForBars(earned.Count, CurrentBeatDuration);
+                float barBeatCount = MinimumColorClearBarSequenceBeats(earned.Count);
+                float barStepBeats = ColorClearBarStepBeats(barBeatCount, earned.Count);
+                float holdDuration = 0;
+                float[] removalBeatDurations = null;
+                refillMusicClip = null;
+                if (musicPlayer != null && earned.Count > 0)
+                {
+                    float now = musicPlayer.PlaybackSeconds;
+                    float beat = musicPlayer.BeatPositionAtTime(now);
+                    float removalStartBeat = beat;
+                    if (musicPlayer.Source.isPlaying)
+                    {
+                        float spawnBeat = RefillDownbeat(beat, barBeatCount, !partialClearCelebration,
+                            musicPlayer.CurrentDownbeatOffsetBeats, rewardedLifeSlot >= 0);
+                        // Stretch the bar choreography across the whole musical window before the reserved spawn beat.
+                        barBeatCount = ColorClearBarSequenceBeats(beat, spawnBeat, refillPostBarBeats);
+                        barStepBeats = ColorClearBarStepBeats(barBeatCount, earned.Count);
+                        removalStartBeat = spawnBeat - barBeatCount - refillPostBarBeats;
+                        refillRewardBeat = spawnBeat - 1;
+                        refillMusicClip = musicPlayer.Source.clip;
+                        refillMusicSeconds = now;
+                        refillSpawnSeconds = musicPlayer.SecondsAtBeat(spawnBeat);
+                    }
+                    holdDuration = Mathf.Max(0, musicPlayer.SecondsAtBeat(removalStartBeat) - now);
+                    removalBeatDurations = new float[earned.Count];
+                    for (int i = 0; i < earned.Count; i++)
+                    {
+                        float stepStart = removalStartBeat + i * barStepBeats;
+                        removalBeatDurations[i] = musicPlayer.SecondsAtBeat(stepStart + barStepBeats) -
+                            musicPlayer.SecondsAtBeat(stepStart);
+                    }
+                }
+                float refillDuration = holdDuration + FullSetCelebration.DurationForBars(barBeatCount, CurrentBeatDuration);
+                if (removalBeatDurations != null)
+                {
+                    refillDuration = holdDuration;
+                    for (int i = 0; i < removalBeatDurations.Length; i++)
+                        refillDuration += Mathf.Max(.0001f, removalBeatDurations[i]);
+                }
                 if (earned.Count > 0)
                 {
-                    ClearCelebration.Begin(earned, plan, refillDuration, musicPlayer?.DurationsForBeats(earned.Count));
+                    ClearCelebration.Begin(earned, plan, refillDuration, removalBeatDurations, holdDuration);
                     refillDuration = ClearCelebration.PlaybackDuration;
                 }
                 else ClearCelebration.Reset();
+                if (rewardedLifeSlot >= 0) player.LifeIcons.ReserveGain(rewardedLifeSlot);
                 // A developer override can exclude every earned color. Reserve the final reward color anyway.
                 if (plan != null && plan.Length > 0 && ClearCelebration.LastColor.HasValue &&
                     System.Array.IndexOf(plan, ClearCelebration.LastColor.Value) < 0)
@@ -530,6 +619,24 @@ namespace CandyCruisers
 
         public static float SecondsToNextBeat(float beatPosition, float beatDuration) =>
             (Mathf.Floor(beatPosition) + 1 - beatPosition) * Mathf.Max(.0001f, beatDuration);
+
+        public static float RefillDownbeat(float clearBeat, float minimumBarBeats, bool allBarsFull,
+            int offset = GameplayMusicPlayer.DownbeatOffsetBeats, bool lifeAwarded = false)
+        {
+            // Pick the downbeat first; the bar choreography stretches into the available space.
+            float earliestSpawn = clearBeat + Mathf.Max(0, minimumBarBeats) + 1 + (lifeAwarded ? 1 : 0);
+            return Mathf.Ceil((earliestSpawn - offset) / GameplayMusicPlayer.BeatsPerMeasure) *
+                GameplayMusicPlayer.BeatsPerMeasure + offset;
+        }
+
+        public static float MinimumColorClearBarSequenceBeats(int earnedBars) =>
+            earnedBars > 0 ? 1 : 0;
+
+        public static float ColorClearBarSequenceBeats(float clearBeat, float spawnBeat, int postBarBeats) =>
+            Mathf.Max(0, spawnBeat - clearBeat - Mathf.Max(0, postBarBeats));
+
+        public static float ColorClearBarStepBeats(float sequenceBeats, int earnedBars) =>
+            earnedBars > 0 ? Mathf.Max(.0001f, sequenceBeats) / earnedBars : 0;
 
         private void BeginBatch(EnemyColor[] plan, float duration)
         {
@@ -608,6 +715,7 @@ namespace CandyCruisers
         {
             if (DeveloperOptions.PlayerInvincible) return;
             if (State != RunState.Playing && State != RunState.Refilling) return;
+            FadeComboOnDeath();
             GameOverBlackoutSeconds = musicPlayer != null ? musicPlayer.SecondsForBeats(GameOverBlackoutBeats) :
                 GameOverBlackoutBeats * CurrentBeatDuration;
             State = RunState.Dying;
@@ -735,44 +843,33 @@ namespace CandyCruisers
             GUI.color = previous;
         }
 
-        public static Rect GameOverModalRect(float screenWidth, float screenHeight)
+        public const string GameOverTitle = "GAME OVER";
+        public static Rect GameOverTitleRect(float screenWidth, float screenHeight)
         {
-            float width = Mathf.Min(360, screenWidth - 24), height = Mathf.Min(440, screenHeight - 24);
-            return new Rect((screenWidth - width) / 2, (screenHeight - height) / 2, width, height);
+            float width = Mathf.Min(560, screenWidth - 32), height = Mathf.Min(96, screenHeight - 32);
+            float top = Mathf.Max(16, screenHeight * .4f - height / 2);
+            return new Rect((screenWidth - width) / 2, top, width, height);
         }
-        public static Rect GameOverRestartRect(Rect panel) => new Rect(panel.x + 20, panel.yMax - 112, panel.width - 40, 44);
-        public static Rect GameOverMainMenuRect(Rect panel) => new Rect(panel.x + 20, panel.yMax - 56, panel.width - 40, 40);
+
+        public static int FitGameOverTitle(GUIStyle style, Rect rect)
+        {
+            var content = new GUIContent(GameOverTitle);
+            while (style.fontSize > 20 &&
+                (style.CalcSize(content).x > rect.width || style.CalcHeight(content, rect.width) > rect.height))
+                style.fontSize--;
+            return style.fontSize;
+        }
 
         private void DrawGameOver()
         {
-            float opacity = GameOverModalOpacity;
+            float opacity = GameOverTitleOpacity;
             if (opacity <= 0) return;
             var previousColor = GUI.color;
-            bool previouslyEnabled = GUI.enabled;
-            var panel = GameOverModalRect(GuiWidth, GuiHeight);
-            GUI.color = new Color(0, 0, 0, .72f * opacity);
-            GUI.DrawTexture(new Rect(0, 0, GuiWidth, GuiHeight), Texture2D.whiteTexture);
-            GUI.color = new Color(.07f, .07f, .085f, .98f * opacity);
-            GUI.DrawTexture(panel, Texture2D.whiteTexture);
-            GUI.color = new Color(1, .3f, .38f, opacity);
-            GUI.DrawTexture(new Rect(panel.x, panel.y, panel.width, 3), Texture2D.whiteTexture);
             GUI.color = new Color(1, 1, 1, opacity);
-            var heading = new GUIStyle(GUI.skin.label) { fontSize = 28, alignment = TextAnchor.MiddleCenter };
-            heading.normal.textColor = Color.white;
-            GUI.Label(new Rect(panel.x + 16, panel.y + 18, panel.width - 32, 40), "Game Over", heading);
-            var score = new GUIStyle(heading) { fontSize = 20 };
-            string finalScore = "Score " + Progress.Score.ToString("N0");
-            while (score.fontSize > 10 && score.CalcSize(new GUIContent(finalScore)).x > panel.width - 32) score.fontSize--;
-            GUI.Label(new Rect(panel.x + 16, panel.y + 62, panel.width - 32, 28), finalScore, score);
-            score.fontSize = 15;
-            GUI.Label(new Rect(panel.x + 16, panel.y + 96, panel.width - 32, 24),
-                "Level " + Progress.Level + (LastLeaderboardRank > 0 ? "   /   Rank #" + LastLeaderboardRank : ""), score);
-            DrawLeaderboard(new Rect(panel.x + 16, panel.y + 136, panel.width - 32, panel.height - 260), true);
-            GUI.enabled = previouslyEnabled && GameOverMenuReady;
-            var button = new GUIStyle(GUI.skin.button) { fontSize = 20 };
-            if (GUI.Button(GameOverRestartRect(panel), "Restart", button)) Restart();
-            if (GUI.Button(GameOverMainMenuRect(panel), "Main Menu", button)) ReturnToMenu();
-            GUI.enabled = previouslyEnabled;
+            var title = CreateTitleStyle();
+            var rect = GameOverTitleRect(GuiWidth, GuiHeight);
+            FitGameOverTitle(title, rect);
+            GUI.Label(rect, GameOverTitle, title);
             GUI.color = previousColor;
         }
 
@@ -860,6 +957,45 @@ namespace CandyCruisers
             return new Rect(playfieldX + textWidth - width, row.center.y - height / 2, width, height);
         }
 
+        public static List<EnemyColor> ColorClearBarColors(EnemyRowSpawner spawner, EnemyGrid grid)
+        {
+            var colors = spawner != null ? spawner.UnlockedColors() : grid != null ? grid.SeenColors() : new List<EnemyColor>();
+            if (spawner != null)
+                colors.RemoveAll(color => spawner.Prefab(color) == null ||
+                    spawner.Prefab(color).GetComponentInChildren<SpriteRenderer>() == null);
+            colors.Sort();
+            return colors;
+        }
+
+        public static Rect ColorClearBarSlotRect(float x, float bottom, float width, int count, int index)
+        {
+            if (count <= 0) return new Rect(x, bottom, 0, 0);
+            float segmentWidth = width / count;
+            return new Rect(x + index * segmentWidth, bottom, Mathf.Max(1, segmentWidth - 2), 5);
+        }
+
+        public static float ColorClearBarMusicLevel(float beatPosition, int slot)
+        {
+            float primary = GameplayMusicPlayer.BeatPulse(beatPosition - slot * .17f);
+            float offbeat = GameplayMusicPlayer.BeatPulse(beatPosition + slot * .11f, true) * .55f;
+            return Mathf.Clamp01(.18f + .82f * Mathf.Max(primary, offbeat));
+        }
+
+        public static Rect ColorClearBarLevelRect(Rect resting, float beatPosition, int slot)
+        {
+            float level = ColorClearBarMusicLevel(beatPosition, slot);
+            float height = Mathf.Max(resting.height, Mathf.Lerp(resting.height * 1.2f, 24, level));
+            return new Rect(resting.x, resting.yMax - height, resting.width, height);
+        }
+
+        public static Color ColorClearBarTint(EnemyColor color, bool powered, float opacity = 1)
+        {
+            var source = EnemyPalette.Get(color);
+            if (powered) return new Color(source.r, source.g, source.b, .95f * opacity);
+            return new Color(Mathf.Lerp(.08f, source.r, .42f), Mathf.Lerp(.1f, source.g, .42f),
+                Mathf.Lerp(.12f, source.b, .42f), .28f * opacity);
+        }
+
         public static Rect ComboMultiplierDisplayRect(Rect resting, float screenWidth, float screenHeight, float elapsed)
         {
             if (elapsed >= ComboMilestoneAnimationSeconds) return resting;
@@ -892,7 +1028,7 @@ namespace CandyCruisers
             if (GUI.Button(MenuLevelUpRect(x, y, width), "+ (Right)", stepButton)) { menuLevelDigits = ""; StartLevel++; }
         }
 
-        private void DrawMainMenuTitle(float menuAnchorY)
+        private GUIStyle CreateTitleStyle()
         {
             var title = new GUIStyle(GUI.skin.label)
             {
@@ -904,7 +1040,12 @@ namespace CandyCruisers
                 padding = new RectOffset()
             };
             title.normal.textColor = Color.white;
+            return title;
+        }
 
+        private void DrawMainMenuTitle(float menuAnchorY)
+        {
+            var title = CreateTitleStyle();
             var subtitle = new GUIStyle(title)
             {
                 fontSize = 18
@@ -935,7 +1076,7 @@ namespace CandyCruisers
             for (int i = 0; i < colors.Length; i++)
             {
                 var color = colors[i];
-                var sprite = special ? spawner.SpecialSprite : spawner.Prefab(color)?.GetComponentInChildren<SpriteRenderer>()?.sprite;
+                var sprite = spawner.AppearanceSprite(color, special);
                 DrawPreviewSprite(new Rect(x + i * (size + gap), y, size, size), sprite, EnemyPalette.Get(color));
             }
         }
@@ -954,7 +1095,25 @@ namespace CandyCruisers
                 if (previous > 0) ComboBreak.Begin(previous + 1, ComboColor);
                 return;
             }
+            comboDeathFadeElapsed = ComboDeathFadeSeconds;
             if (advanced && IsComboMilestone(Progress.ComboMultiplier)) BeginComboMilestone();
+        }
+
+        private void FadeComboOnDeath()
+        {
+            // Cancelling an in-flight tongue can reset the combo before the hit event arrives.
+            int multiplier = Progress.ComboMultiplier > 1 ? Progress.ComboMultiplier : ComboBreak.Active ? ComboBreak.Multiplier : 1;
+            if (multiplier > 1)
+            {
+                ComboDeathMultiplier = multiplier;
+                ComboDeathColor = Progress.ComboMultiplier > 1 ? ComboColor : ComboBreak.SourceColor;
+                comboDeathFadeElapsed = 0;
+            }
+            Progress.ResetCombo();
+            observedComboStreak = Progress.ComboStreak;
+            comboMilestoneMultiplier = 0;
+            comboMilestoneElapsed = ComboMilestoneAnimationSeconds;
+            ComboBreak.Reset();
         }
 
         private void BeginComboMilestone()
@@ -966,6 +1125,7 @@ namespace CandyCruisers
         private void TickComboPresentation(float seconds)
         {
             ComboBreak.Tick(seconds);
+            comboDeathFadeElapsed = Mathf.Min(ComboDeathFadeSeconds, comboDeathFadeElapsed + Mathf.Max(0, seconds));
             if (comboMilestoneMultiplier <= 1) return;
             comboMilestoneElapsed = Mathf.Min(ComboMilestoneAnimationSeconds,
                 comboMilestoneElapsed + Mathf.Max(0, seconds));
@@ -977,11 +1137,31 @@ namespace CandyCruisers
             comboMilestoneMultiplier = 0;
             comboMilestoneElapsed = ComboMilestoneAnimationSeconds;
             ComboBreak.Reset();
+            ComboDeathMultiplier = 0;
+            ComboDeathColor = Color.white;
+            comboDeathFadeElapsed = ComboDeathFadeSeconds;
             ComboColor = Color.white;
         }
 
         public static bool IsComboMilestone(int multiplier) =>
             multiplier == 5 || multiplier == 25 || multiplier >= 75 && (multiplier - 25) % 50 == 0;
+        public static bool ShouldDrawComboMultiplier(int multiplier) => multiplier > 1;
+        public static Rect LevelProgressFillRect(Rect bar, float fraction) =>
+            new Rect(bar.x, bar.y, bar.width * Mathf.Clamp01(fraction), bar.height);
+        public static Rect LevelProgressBankedRect(Rect bar, float fraction) =>
+            new Rect(bar.x, bar.y + bar.height * .55f, bar.width * Mathf.Clamp01(fraction), Mathf.Max(2, bar.height * .45f));
+        public static Rect LevelProgressSolidRect(Rect bar, bool pending, float pulse)
+        {
+            float expansion = pending ? 3 * Mathf.Clamp01(pulse) : 0;
+            return new Rect(bar.x - expansion, bar.y - expansion,
+                bar.width + expansion * 2, bar.height + expansion * 2);
+        }
+        public static Rect LevelProgressGlowRect(Rect bar, float pulse)
+        {
+            float expansion = Mathf.Lerp(3, 8, Mathf.Clamp01(pulse));
+            return new Rect(bar.x - expansion, bar.y - expansion * .55f,
+                bar.width + expansion * 2, bar.height + expansion * 1.1f);
+        }
 
         private static void DrawPreviewSprite(Rect rect, Sprite sprite, Color tint)
         {
@@ -1012,33 +1192,49 @@ namespace CandyCruisers
             var label = new GUIStyle(GUI.skin.label) { fontSize = viewHeight < 400 ? 11 : viewHeight < 600 ? 13 : 16, fontStyle = FontStyle.Bold };
             label.normal.textColor = Color.white;
             float textWidth = width - 54;
-            GUI.Label(new Rect(x, y, textWidth * .65f, 26), "SCORE " + Progress.Score.ToString("N0"), label);
-            label.alignment = TextAnchor.UpperRight;
-            GUI.Label(new Rect(x + textWidth * .65f, y, textWidth * .35f, 26), "LEVEL " + Progress.Level, label);
+            float beat = musicPlayer != null ? musicPlayer.BeatPosition : Time.time / FullSetCelebration.StepDuration;
+            float pulse = GameplayMusicPlayer.BeatPulse(beat);
+            var progressBar = new Rect(x, progressY, width, 9);
+            var solidBar = LevelProgressSolidRect(progressBar, Progress.LevelUpPending, pulse);
             GUI.color = new Color(.3f, .4f, .45f, .7f * opacity);
-            GUI.DrawTexture(new Rect(x, progressY, width, 9), Texture2D.whiteTexture);
+            GUI.DrawTexture(progressBar, Texture2D.whiteTexture);
             var progressColor = ProgressBarColor;
+            if (Progress.LevelUpPending)
+            {
+                var glowColor = progressColor;
+                glowColor.a = Mathf.Lerp(.16f, .46f, pulse) * opacity;
+                GUI.color = glowColor;
+                GUI.DrawTexture(LevelProgressGlowRect(progressBar, pulse), Texture2D.whiteTexture);
+                progressColor = Color.Lerp(progressColor, Color.white, Mathf.Lerp(.2f, .48f, pulse));
+            }
             progressColor.a *= opacity;
             GUI.color = progressColor;
-            float fraction = (float)(Progress.Defeated - Progress.PreviousThreshold) /
-                (Progress.NextThreshold - Progress.PreviousThreshold);
-            GUI.DrawTexture(new Rect(x, progressY, width * fraction, 9), Texture2D.whiteTexture);
-            var colors = grid.SeenColors();
+            GUI.DrawTexture(LevelProgressFillRect(solidBar, Progress.ActiveLevelProgressFraction), Texture2D.whiteTexture);
+            if (Progress.LevelUpPending && Progress.BankedLevelProgressFraction > 0)
+            {
+                var banked = Color.Lerp(progressColor, Color.white, .45f);
+                banked.a = Mathf.Lerp(.65f, 1f, pulse) * opacity;
+                GUI.color = banked;
+                GUI.DrawTexture(LevelProgressBankedRect(solidBar, Progress.BankedLevelProgressFraction), Texture2D.whiteTexture);
+            }
+            var colors = ColorClearBarColors(spawner, grid);
             float bottom = GuiHeight - ToGuiPoint(camera.WorldToScreenPoint(new Vector3(0, -5.25f, 0))).y;
             for (int i = 0; i < colors.Count; i++)
             {
-                if (!grid.HasColorClearBar(colors[i]) || !ClearCelebration.Visible(colors[i])) continue;
-                float segmentWidth = width / colors.Count;
-                var color = EnemyPalette.Get(colors[i]);
-                color.a *= opacity;
-                GUI.color = color;
-                var resting = new Rect(x + i * segmentWidth, bottom, segmentWidth - 2, 5);
+                var color = colors[i];
+                var resting = ColorClearBarSlotRect(x, bottom, width, colors.Count, i);
+                bool powered = grid != null && grid.HasColorClearBar(color) && ClearCelebration.Visible(color);
+                if (!powered)
+                {
+                    DrawPoweredDownColorClearBar(color, resting, opacity);
+                    continue;
+                }
                 var animated = ClearCelebration.Active ? ClearCelebration.Present(colors[i], resting) :
                     clearBarAnimation.Present(colors[i], resting);
                 // The enlarged bar stays inside the playfield, including the end slots.
                 animated.width = Mathf.Min(animated.width, width);
                 animated.x = Mathf.Clamp(animated.x, x, x + width - animated.width);
-                GUI.DrawTexture(animated, Texture2D.whiteTexture);
+                DrawPoweredColorClearBar(color, animated, opacity, beat, i);
             }
             var comboRect = ComboMultiplierRestRect(x, textWidth, y, viewHeight);
             int comboFontSize = viewHeight < 400 ? 11 : viewHeight < 600 ? 13 : 16;
@@ -1055,7 +1251,8 @@ namespace CandyCruisers
                     clipping = TextClipping.Clip
                 };
                 comboStyle.normal.textColor = Color.white;
-                if (!ComboBreak.Active || Progress.ComboMultiplier > 1) DrawComboMultiplier(comboRect, comboStyle, opacity);
+                if (ComboDeathOpacity > 0 || ShouldDrawComboMultiplier(Progress.ComboMultiplier))
+                    DrawComboMultiplier(comboRect, comboStyle, opacity);
                 ComboBreak.Draw(comboRect, comboStyle, opacity, GuiWidth, GuiHeight);
             }
             GUI.color = new Color(1, 1, 1, opacity);
@@ -1064,6 +1261,12 @@ namespace CandyCruisers
             label.alignment = TextAnchor.UpperLeft;
             label.wordWrap = true;
             if (player != null) player.LifeIcons.Draw(player, lifeRow, opacity, GuiWidth, GuiHeight);
+            // Keep the heading above life artwork, including traveling reward/loss animations.
+            GUI.color = new Color(1, 1, 1, opacity);
+            var heading = new GUIStyle(label) { fontStyle = FontStyle.Bold, wordWrap = false, alignment = TextAnchor.UpperLeft };
+            GUI.Label(new Rect(x, y, textWidth * .65f, 26), "SCORE " + Progress.Score.ToString("N0"), heading);
+            heading.alignment = TextAnchor.UpperRight;
+            GUI.Label(new Rect(x + textWidth * .65f, y, textWidth * .35f, 26), "LEVEL " + Progress.Level, heading);
             string status = "";
             if (player != null && player.MagicCharges > 0)
                 status += (status.Length > 0 ? "  |  " : "") + "MAGIC " + player.MagicCharges;
@@ -1078,10 +1281,46 @@ namespace CandyCruisers
             GUI.color = previous;
         }
 
+        private static void DrawPoweredDownColorClearBar(EnemyColor color, Rect resting, float opacity)
+        {
+            var shadow = ColorClearBarTint(color, false, opacity);
+            shadow.a *= .5f;
+            GUI.color = shadow;
+            GUI.DrawTexture(new Rect(resting.x, resting.y + 1, resting.width, resting.height), Texture2D.whiteTexture);
+            GUI.color = ColorClearBarTint(color, false, opacity);
+            GUI.DrawTexture(resting, Texture2D.whiteTexture);
+        }
+
+        private static void DrawPoweredColorClearBar(EnemyColor color, Rect resting, float opacity, float beatPosition, int slot)
+        {
+            var level = ColorClearBarLevelRect(resting, beatPosition, slot);
+            float pulse = ColorClearBarMusicLevel(beatPosition, slot);
+            var tint = ColorClearBarTint(color, true, opacity);
+            var glow = tint;
+            glow.a = .14f * opacity * Mathf.Lerp(.55f, 1, pulse);
+            GUI.color = glow;
+            GUI.DrawTexture(Expanded(level, 8, 7), Texture2D.whiteTexture);
+            glow.a *= .65f;
+            GUI.color = glow;
+            GUI.DrawTexture(Expanded(level, 4, 4), Texture2D.whiteTexture);
+            GUI.color = tint;
+            GUI.DrawTexture(level, Texture2D.whiteTexture);
+            var shine = Color.Lerp(tint, Color.white, .65f);
+            shine.a = .35f * opacity;
+            GUI.color = shine;
+            GUI.DrawTexture(new Rect(level.x, level.y, level.width, Mathf.Min(3, level.height * .28f)), Texture2D.whiteTexture);
+        }
+
+        private static Rect Expanded(Rect rect, float x, float y) =>
+            new Rect(rect.x - x, rect.y - y, rect.width + x * 2, rect.height + y * 2);
+
         private void DrawComboMultiplier(Rect resting, GUIStyle baseStyle, float opacity)
         {
-            bool animating = comboMilestoneMultiplier > 1 && comboMilestoneElapsed < ComboMilestoneAnimationSeconds;
-            int multiplier = Progress.ComboMultiplier;
+            bool fading = ComboDeathOpacity > 0;
+            bool animating = !fading && comboMilestoneMultiplier > 1 && comboMilestoneElapsed < ComboMilestoneAnimationSeconds;
+            int multiplier = fading ? ComboDeathMultiplier : Progress.ComboMultiplier;
+            var color = fading ? ComboDeathColor : ComboColor;
+            if (fading) opacity *= ComboDeathOpacity;
             var rect = animating ? ComboMultiplierDisplayRect(resting, GuiWidth, GuiHeight, comboMilestoneElapsed) : resting;
             float scale = Mathf.Max(1, rect.height / resting.height);
             var style = new GUIStyle(baseStyle)
@@ -1095,7 +1334,7 @@ namespace CandyCruisers
             var previous = GUI.color;
             GUI.color = new Color(0, 0, 0, .7f * opacity);
             GUI.Label(new Rect(rect.x + 2, rect.y + 2, rect.width, rect.height), text, style);
-            GUI.color = new Color(ComboColor.r, ComboColor.g, ComboColor.b, opacity);
+            GUI.color = new Color(color.r, color.g, color.b, opacity);
             GUI.Label(rect, text, style);
             GUI.color = previous;
         }

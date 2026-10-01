@@ -31,7 +31,7 @@ namespace CandyCruisers.Editor
             {
                 celebration.Begin(colors.Take(count).ToList());
                 celebration.Tick(FullSetCelebration.StepDuration * count - .001f);
-                Check(!celebration.Finished, "Every bar count uses one beat per earned bar");
+                Check(!celebration.Finished, "Standalone celebration defaults use one fallback beat per supplied bar");
                 celebration.Tick(.002f);
                 Check(celebration.Finished, "Every bar count completes at its beat-count deadline");
             }

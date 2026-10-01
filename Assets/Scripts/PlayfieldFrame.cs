@@ -12,9 +12,10 @@ namespace CandyCruisers
         private readonly LineRenderer[] corners = new LineRenderer[4];
         private static readonly EnemyColor[] Colors = (EnemyColor[])System.Enum.GetValues(typeof(EnemyColor));
         private readonly EnemyColor[] earnedColors = new EnemyColor[Colors.Length];
-        public const float SpawnPulseSeconds = .8f;
+        public const float SpawnPulseSeconds = 60f / GameplayMusicPlayer.DefaultBeatsPerMinute;
         public const float SpawnCrunchThickness = 3f;
         private GameSession subscribedSession;
+        private float spawnPulseDuration = SpawnPulseSeconds;
         private float spawnPulseRemaining;
         private GameplayFraming crunchFraming;
         private SpriteMask playerClip;
@@ -24,6 +25,7 @@ namespace CandyCruisers
         private SortingGroup clipGroup;
         private bool ownsClipGroup, clipGroupWasEnabled;
         public bool SpawnPulseActive => spawnPulseRemaining > 0;
+        public float SpawnPulseDuration => spawnPulseDuration;
 
         public void Configure(PlayerMovement controller)
         {
@@ -108,7 +110,9 @@ namespace CandyCruisers
         {
             if (crunchFraming == null && Camera.main != null)
                 crunchFraming = Camera.main.GetComponent<GameplayFraming>();
-            spawnPulseRemaining = SpawnPulseSeconds;
+            var music = player != null ? player.Music : null;
+            spawnPulseDuration = music != null ? Mathf.Max(.0001f, music.BeatDuration) : SpawnPulseSeconds;
+            spawnPulseRemaining = spawnPulseDuration;
             Refresh();
         }
         public void Tick(float seconds)
@@ -153,7 +157,7 @@ namespace CandyCruisers
         private void ApplyTint(Color color)
         {
             float pulse = SpawnPulseActive ? Mathf.Pow(Mathf.Sin(Mathf.PI *
-                Mathf.Clamp01(spawnPulseRemaining / SpawnPulseSeconds)), 2) : 0;
+                Mathf.Clamp01(spawnPulseRemaining / spawnPulseDuration)), 2) : 0;
             float screenScale = 1;
             if (crunchFraming != null)
             {

@@ -10,10 +10,11 @@ namespace CandyCruisers
         public const float Duration = StepDuration * MaxRewardBars;
         private readonly List<EnemyColor> colors = new List<EnemyColor>();
         private float age;
+        private float holdSeconds;
         private readonly List<float> stepEnds = new List<float>();
         public float PlaybackDuration => Active ? stepEnds[stepEnds.Count - 1] : 0;
-        public static float DurationForBars(int bars, float beatDuration) =>
-            Mathf.Max(0, bars) * Mathf.Max(.0001f, beatDuration);
+        public static float DurationForBars(float barBeats, float beatDuration) =>
+            Mathf.Max(0, barBeats) * Mathf.Max(.0001f, beatDuration);
         private static float BeatDurationForTotal(float duration, int bars) =>
             Mathf.Max(.0001f, Mathf.Max(.0001f, duration) / Mathf.Max(1, bars));
         private readonly System.Random random = new System.Random();
@@ -36,20 +37,22 @@ namespace CandyCruisers
             {
                 if (!Active) return 0;
                 int step = Step;
-                float start = step == 0 ? 0 : stepEnds[step - 1];
+                float start = step == 0 ? holdSeconds : stepEnds[step - 1];
                 return Mathf.Clamp01((age - start) / (stepEnds[step] - start));
             }
         }
         private int ColorIndex => Mathf.Clamp(Step, 0, Mathf.Max(0, colors.Count - 1));
         public Color Color => Active && (Finished || StepProgress >= .5f) ?
             EnemyPalette.Get(colors[ColorIndex]) : UnityEngine.Color.white;
-        public void Begin(List<EnemyColor> earned, EnemyColor[] plan = null, float duration = -1, float[] beatDurations = null)
+        public void Begin(List<EnemyColor> earned, EnemyColor[] plan = null, float duration = -1,
+            float[] beatDurations = null, float holdDuration = 0)
         {
             colors.Clear(); colors.AddRange(earned); age = 0;
+            holdSeconds = Mathf.Max(0, holdDuration);
             float totalDuration = duration >= 0 ? duration : DurationForBars(colors.Count, StepDuration);
-            float fallback = BeatDurationForTotal(totalDuration, colors.Count);
+            float fallback = BeatDurationForTotal(totalDuration - holdSeconds, colors.Count);
             stepEnds.Clear();
-            float end = 0;
+            float end = holdSeconds;
             for (int i = 0; i < colors.Count; i++)
             {
                 float step = beatDurations != null && beatDurations.Length == colors.Count ? beatDurations[i] : fallback;
@@ -67,7 +70,7 @@ namespace CandyCruisers
                     if (System.Array.IndexOf(plan, colors[i]) >= 0)
                     { var swap = colors[colors.Count - 1]; colors[colors.Count - 1] = colors[i]; colors[i] = swap; break; }
         }
-        public void Reset() { colors.Clear(); stepEnds.Clear(); age = 0; }
+        public void Reset() { colors.Clear(); stepEnds.Clear(); age = 0; holdSeconds = 0; }
         public void Tick(float seconds)
         {
             float previous = age;

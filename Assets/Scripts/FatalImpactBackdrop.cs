@@ -7,7 +7,6 @@ namespace CandyCruisers
     public sealed class FatalImpactBackdrop : MonoBehaviour
     {
         public const float Duration = .62f;
-        public const int LongAccentLines = 2;
         public const int SortingOrder = GameOverBlackout.CoverOrder + 1;
         private readonly List<Vector3> vertices = new List<Vector3>();
         private readonly List<Color> colors = new List<Color>();
@@ -72,15 +71,7 @@ namespace CandyCruisers
             float fade = 1 - Mathf.SmoothStep(0, 1, (age - .18f) / (Duration - .18f));
             float strength = (.6f + .4f * launch) * fade;
             vertices.Clear(); colors.Clear(); triangles.Clear();
-            for (int slash = 0; slash < LongAccentLines; slash++)
-            {
-                float angle = -.72f + slash * .13f;
-                var direction = Direction(angle).normalized;
-                float reach = ExitDistance(center, direction) * 1.18f;
-                float width = (.012f - slash * .003f) * (1 + launch * .45f);
-                Stroke(center - direction * reach, center + direction * reach, width, new Color(1, 1, 1, strength));
-            }
-            // Short broken arcs stay close to the hit; the screen-spanning lines remain straight.
+            // Short broken arcs stay close to the hit; no backdrop geometry should span the whole screen.
             for (int arc = 0; arc < 3; arc++)
             {
                 float radius = .042f + arc * .019f + launch * .022f + age * .06f;
@@ -94,15 +85,6 @@ namespace CandyCruisers
                     Stroke(previous, point, .0007f + .0014f * taper, new Color(1, 1, 1, strength * .8f));
                     previous = point;
                 }
-            }
-            float flare = Mathf.Max(0, 1 - Mathf.Abs(age - PlayerDeathBurst.ShatterSeconds) / .15f) * fade;
-            for (int ray = 0; ray < 10; ray++)
-            {
-                float angle = ray * Mathf.PI * 2 / 10 + .15f;
-                var direction = new Vector2(Mathf.Cos(angle) / aspect, Mathf.Sin(angle));
-                var side = new Vector2(-Mathf.Sin(angle) / aspect, Mathf.Cos(angle));
-                Triangle(center - side * .012f, center + direction * (.055f + launch * .055f),
-                    center + side * .012f, new Color(1, 1, 1, flare));
             }
             DrawParticles(center, fade);
             mesh.Clear();
@@ -141,13 +123,6 @@ namespace CandyCruisers
                 color.a = fade * Mathf.Lerp(.7f, 1, shimmer);
                 particle.color = color;
             }
-        }
-
-        private static float ExitDistance(Vector2 center, Vector2 direction)
-        {
-            float x = Mathf.Abs(direction.x) < .0001f ? 100 : (direction.x > 0 ? 1 - center.x : -center.x) / direction.x;
-            float y = Mathf.Abs(direction.y) < .0001f ? 100 : (direction.y > 0 ? 1 - center.y : -center.y) / direction.y;
-            return Mathf.Max(.1f, Mathf.Min(x, y));
         }
 
         private void Stroke(Vector2 start, Vector2 end, float width, Color color)

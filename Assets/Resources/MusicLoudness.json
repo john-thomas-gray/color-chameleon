@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "targetLufs": -14.0,
+  "targetLufs": -15.79,
   "truePeakCeilingDbtp": -1,
   "tracks": [
     {
@@ -8,35 +8,98 @@
       "sourceSha256": "4c0c879f7c86fdceb4e0287e456285eaf33f03a6eef4f8593a6f3586f1bbfabc",
       "integratedLufs": -9.51,
       "truePeakDbtp": 0.49,
-      "gainDb": -4.49
+      "gainDb": -6.28
+    },
+    {
+      "resourceName": "CountingMetronome",
+      "sourceSha256": "ff6857bc483a87d1bac375766265599d66a1eae5fc09ba187cf4b705c661e915",
+      "integratedLufs": -15.79,
+      "truePeakDbtp": -1.0,
+      "gainDb": 0.0
     },
     {
       "resourceName": "DiscoDescent",
       "sourceSha256": "73fdf7edbc60bff793924b1f8c9b7caedd704a20cb753f45e19e69929fa107be",
       "integratedLufs": -7.41,
       "truePeakDbtp": 0.51,
-      "gainDb": -6.59
+      "gainDb": -8.38
+    },
+    {
+      "resourceName": "DownToEarthPart1",
+      "sourceSha256": "5cd8c6f8a149990b6a19a2c362d3d1c2c8d09e48bda6e17d5c2c188bc27901f4",
+      "integratedLufs": -6.03,
+      "truePeakDbtp": 3.91,
+      "gainDb": -9.76
     },
     {
       "resourceName": "GameplayMusic",
       "sourceSha256": "8f69b58593549824ce6a35c380228f339906450ce07903dc30970bdb4220f90f",
       "integratedLufs": -7.79,
       "truePeakDbtp": 1.31,
-      "gainDb": -6.21
+      "gainDb": -8.0
+    },
+    {
+      "resourceName": "IntergalacticEmotionalBreakdown",
+      "sourceSha256": "07e2055eda309be9fe979c8a7d87d331793d9e1ef1885f6a4de1f48eba170687",
+      "integratedLufs": -9.04,
+      "truePeakDbtp": 1.33,
+      "gainDb": -6.75
     },
     {
       "resourceName": "PotentialForAnything",
       "sourceSha256": "fe6b46cda24c0ec4f9efaa0257c99ca567f4a72d8f819ad338c1875ff156f675",
       "integratedLufs": -8.71,
       "truePeakDbtp": 0.5,
-      "gainDb": -5.29
+      "gainDb": -7.08
+    },
+    {
+      "resourceName": "ShootingRobotsInSpace",
+      "sourceSha256": "81c233906faf47df58c44c84fdcaa5d218e3ba623b7fbe7cf0c0f7627b4478af",
+      "integratedLufs": -12.21,
+      "truePeakDbtp": 1.23,
+      "gainDb": -3.58
+    },
+    {
+      "resourceName": "Skanska",
+      "sourceSha256": "e60efafa67b3fd879697b8c51242f7a2c6c516ad2eda22ef5f1ed65c31f8db1e",
+      "integratedLufs": -8.44,
+      "truePeakDbtp": 1.85,
+      "gainDb": -7.35
+    },
+    {
+      "resourceName": "TheThirdKind",
+      "sourceSha256": "d5a56278fbcda441000265d7e36ee36cd52ca9b4b7929e0d9962b12e92ded881",
+      "integratedLufs": -9.5,
+      "truePeakDbtp": 1.68,
+      "gainDb": -6.29
+    },
+    {
+      "resourceName": "UntilICollapse",
+      "sourceSha256": "698ce981fcd19255c04c2eb7d59d22db92c3fc80e6de6a49e1ac8d5da8086c03",
+      "integratedLufs": -8.37,
+      "truePeakDbtp": 3.12,
+      "gainDb": -7.42
+    },
+    {
+      "resourceName": "VertexStage1",
+      "sourceSha256": "c22620aa0c6cebff546cf5e78c308d8f8dd53c8b989357699867ba45ab890a13",
+      "integratedLufs": -5.83,
+      "truePeakDbtp": 5.54,
+      "gainDb": -9.96
+    },
+    {
+      "resourceName": "WarOnActivism",
+      "sourceSha256": "45ab107b8e09f51ee186a5b6a466a1eb32a7cf51f2e6605040546983805f876b",
+      "integratedLufs": -8.11,
+      "truePeakDbtp": 1.83,
+      "gainDb": -7.68
     },
     {
       "resourceName": "We Are Not Anonymous",
       "sourceSha256": "afd76e78e7bcd07bfa88c435533bd81d52c976b71b04fc8ce25c665e5a773537",
       "integratedLufs": -7.73,
       "truePeakDbtp": 2.51,
-      "gainDb": -6.27
+      "gainDb": -8.06
     }
   ]
 }

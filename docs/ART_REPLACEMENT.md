@@ -5,10 +5,13 @@
 Fatal fleet contact and recoverable player hits invoke `CharacterVisuals.PlayerDefeat`, including the normal
 Defeated event and Animator trigger. The player's existing defeat-prefab slot
 replaces the entire placeholder, including its duration or completion event.
-With no prefab assigned, `PlayerDeathBurst` snapshots the body and eyes, flashes
-white, then scatters colored fragments for 0.9 seconds. The real sprites stay
-hidden until the scene restarts for fatal contact, or until respawn after a
-recoverable hit. Unlike enemy defeats, it never displays a digit.
+With no prefab assigned, recoverable hits use `PlayerDeathBurst`: it snapshots
+the body and eyes, flashes white, then scatters colored fragments for 0.9 seconds.
+Fatal game-over hits use `PlayerFatalDustBurst` instead, throwing multicolored
+space-dust from every currently unlocked enemy color into a hot core cloud and a
+faster flat shock ring. The real sprites stay hidden until the scene restarts for
+fatal contact, or until respawn after a recoverable hit. Unlike enemy defeats, it
+never displays a digit.
 
 During `GameSession.RunState.Dying`, gameplay is suspended and the session drives
 the cue timer exactly once per frame. Game over follows cue completion; the

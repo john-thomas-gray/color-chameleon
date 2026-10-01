@@ -7,6 +7,12 @@ namespace CandyCruisers.Editor
 {
     public static class SoundEffectsChecks
     {
+        private static readonly string[] ActiveSoundtrack =
+            { "AnotherJoe", "PotentialForAnything", "DiscoDescent", "GameplayMusic", "Skanska",
+                "TheThirdKind", "DownToEarthPart1", "UntilICollapse", "WarOnActivism",
+                "IntergalacticEmotionalBreakdown", "ShootingRobotsInSpace", "VertexStage1",
+                "CountingMetronome" };
+
         public static void ReimportSoundtrackAndCheckGameplay()
         {
             foreach (string name in new[] { "AnotherJoe.wav", "PotentialForAnything.wav" })
@@ -27,6 +33,7 @@ namespace CandyCruisers.Editor
             CheckSlowReturn();
             CheckSeamlessMenuMusic();
             CheckGameplayMusic();
+            CheckDeathMusic();
             MusicLoudnessChecks.Run();
             Debug.Log("Sound effects checks passed: oscillator continuity, animation-driven pitch, early and slow returns, cancellation, music, volume, mute and pause.");
         }
@@ -333,11 +340,11 @@ namespace CandyCruisers.Editor
                             Check(music.CurrentTempo > 60 && music.CurrentTempo < 200, "Each playing track has independent measured beat metadata");
                             if (i + 1 < music.TrackCount) music.SelectNextTrack();
                         }
-                        Check(songs.Count == 4 && songs.Contains("AnotherJoe") && songs.Contains("PotentialForAnything") &&
-                            songs.Contains("DiscoDescent") && songs.Contains("GameplayMusic") &&
+                        Check(songs.Count == ActiveSoundtrack.Length &&
+                            Array.TrueForAll(ActiveSoundtrack, songs.Contains) &&
                             !songs.Contains("We Are Not Anonymous") &&
                             !songs.Contains("PoisonWasTheCure") && !songs.Contains("DriveSlow"),
-                            "Shuffle includes the updated four-song local set exactly once per bag");
+                            "Shuffle includes the updated local soundtrack set exactly once per bag");
                         var last = music.Track;
                         music.SelectNextTrack();
                         Check(music.Track != last, "Shuffle bag boundary avoids immediate repeats");
@@ -431,11 +438,81 @@ namespace CandyCruisers.Editor
             });
         }
 
-        private static bool HasBundledSoundtrack() =>
-            Resources.Load<AudioClip>("AnotherJoe") != null &&
-            Resources.Load<AudioClip>("PotentialForAnything") != null &&
-            Resources.Load<AudioClip>("DiscoDescent") != null &&
-            Resources.Load<AudioClip>("GameplayMusic") != null;
+        private static void CheckDeathMusic()
+        {
+            var clip = AudioClip.Create("Death slowdown music", ArcadeSoundClips.SampleRate * 15,
+                1, ArcadeSoundClips.SampleRate, false);
+            try
+            {
+                foreach (bool muted in new[] { false, true })
+                SpecialEnemyChecks.Fixture((grid, player, tongue) =>
+                {
+                    var session = grid.gameObject.AddComponent<GameSession>();
+                    session.Configure(player);
+                    if (!Application.isPlaying) typeof(GameSession).GetMethod("OnEnable",
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(session, null);
+                    var music = grid.GetComponent<GameplayMusicPlayer>();
+                    var settings = new SerializedObject(music);
+                    settings.FindProperty("track").objectReferenceValue = clip;
+                    settings.FindProperty("volume").floatValue = .23f;
+                    settings.FindProperty("muted").boolValue = muted;
+                    settings.ApplyModifiedPropertiesWithoutUndo();
+                    music.UpdatePlayback();
+                    var source = music.Source;
+                    source.timeSamples = clip.frequency * 2;
+                    int position = source.timeSamples;
+                    typeof(GameSession).GetMethod("BeginPlayerDeath",
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(session, null);
+                    float duration = session.GameOverBlackoutSeconds;
+                    Check(source.clip == clip && source.pitch == 1 && Mathf.Abs(source.volume - .23f) < .0001f &&
+                        source.timeSamples >= position && source.timeSamples - position < clip.frequency / 10,
+                        "Fatal slowdown continues the original recording without restarting, seeking or dropping its volume");
+                    session.Tick(0); session.Tick(-1);
+                    Check(source.pitch == 1 && session.GameOverMusicGain == 1,
+                        "Nonpositive ticks do not advance the music collapse");
+                    float previousPitch = source.pitch, previousVolume = source.volume;
+                    for (int step = 1; step <= 8; step++)
+                    {
+                        session.Tick(duration / 8);
+                        float fade = Mathf.SmoothStep(0, 1, step / 8f);
+                        Check(Mathf.Abs(source.pitch - Mathf.Pow(.04f, fade)) < .0001f &&
+                            Mathf.Abs(source.volume - .23f * (1 - fade)) < .0001f &&
+                            source.pitch < previousPitch && source.volume < previousVolume,
+                            "Every fade step continuously lowers both playback speed and normalized volume");
+                        Check(source.clip == clip && source.mute == muted && !source.loop &&
+                            session.GameOverBlackoutSeconds == duration && !music.SkipCurrentSong() && !music.PlayCountingMetronome(),
+                            "Slowdown preserves the track, mute and captured duration without looping, shuffling or developer skips");
+                        if (step < 8 && Application.isPlaying)
+                            Check(source.isPlaying, "The real audio source keeps playing throughout the collapse");
+                        if (step == 4) Check(Mathf.Abs(source.pitch - .2f) < .0001f,
+                            "At the halfway point the recording is already five times slower");
+                        if (step == 6) Check(source.pitch < .1f, "The final beat descends below one tenth speed");
+                        previousPitch = source.pitch;
+                        previousVolume = source.volume;
+                    }
+                    Check(!source.isPlaying && source.volume == 0 && !music.ShouldPlayMusic,
+                        "Music is fully stopped at the blackout boundary before any shatter");
+                    session.Tick(PlayerDeathBurst.ShatterSeconds + .001f);
+                    var shatter = grid.GetComponent<SoundEffects>().GetClip(SoundEffect.PlayerShatter);
+                    Check(Array.Exists(grid.GetComponentsInChildren<AudioSource>(), voice =>
+                        voice.clip == shatter && voice != source && voice.pitch == 1),
+                        "The shatter uses its own full-speed voice, unaffected by the slowed music");
+                    session.Tick(PlayerDeathBurst.Duration);
+                    music.UpdatePlayback(); music.UpdatePlayback();
+                    Check(session.State == GameSession.RunState.GameOver && !source.isPlaying && source.volume == 0 && source.pitch == 1,
+                        "Game over stays silent and clears the music-only pitch override");
+                });
+            }
+            finally { UnityEngine.Object.DestroyImmediate(clip); }
+            Debug.Log("Death music checks passed: continuous tape-stop pitch, fade, clip continuity, fixed duration, mute, no shuffle and independent shatter.");
+        }
+
+        private static bool HasBundledSoundtrack()
+        {
+            foreach (string name in ActiveSoundtrack)
+                if (Resources.Load<AudioClip>(name) == null) return false;
+            return true;
+        }
 
         private static void Check(bool value, string message)
         { if (!value) throw new Exception("Sound effects check failed: " + message); }

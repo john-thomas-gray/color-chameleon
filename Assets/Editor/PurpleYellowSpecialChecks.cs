@@ -119,7 +119,8 @@ namespace CandyCruisers.Editor
                         "Any non-Yellow ordinary hit reveals with a flash, no kill or stun, and a fresh cooldown");
                     ability.Tick(.5f);
                     Check(yellow.GetComponentInChildren<SpriteRenderer>().color == EnemyPalette.Get(EnemyColor.Yellow) &&
-                        yellow.GetComponentInChildren<SpriteRenderer>().sprite == EnemyPlaceholderArt.Triangle, "Reveal ends as a Yellow tier-two ship");
+                        yellow.GetComponentInChildren<SpriteRenderer>().sprite == grid.GetComponent<EnemyRowSpawner>().SpecialSprite,
+                        "Reveal ends as a Yellow tier-two ship");
                     var blue = Add(grid, EnemyColor.Blue, 1, 1);
                     Check(ability.BeginImitation(blue), "Revealed Yellow can disguise again");
                     ability.Tick(2);

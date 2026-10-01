@@ -9,6 +9,12 @@ namespace CandyCruisers.Editor
 {
     public static class MusicLoudnessChecks
     {
+        private static readonly string[] ActiveSoundtrack =
+            { "AnotherJoe", "PotentialForAnything", "DiscoDescent", "GameplayMusic", "Skanska",
+                "TheThirdKind", "DownToEarthPart1", "UntilICollapse", "WarOnActivism",
+                "IntergalacticEmotionalBreakdown", "ShootingRobotsInSpace", "VertexStage1",
+                "CountingMetronome" };
+
         [Serializable] private sealed class Profile
         {
             public int version;
@@ -30,8 +36,10 @@ namespace CandyCruisers.Editor
             var asset = Resources.Load<TextAsset>("MusicLoudness");
             Check(asset != null, "The measured profile ships as a runtime resource");
             var profile = JsonUtility.FromJson<Profile>(asset.text);
-            Check(profile.version == 1 && profile.tracks.Length == 5, "Every bundled recording has a loudness measurement");
+            Check(profile.version == 1 && profile.tracks != null, "The loudness profile is versioned and readable");
             var profileNames = profile.tracks.Select(entry => entry.resourceName).ToArray();
+            Check(ActiveSoundtrack.All(name => profileNames.Contains(name)),
+                "Every active soundtrack recording has a loudness measurement");
             foreach (var entry in profile.tracks)
             {
                 var clip = Resources.Load<AudioClip>(entry.resourceName);
@@ -126,10 +134,7 @@ namespace CandyCruisers.Editor
         }
 
         private static bool HasBundledSoundtrack() =>
-            Resources.Load<AudioClip>("AnotherJoe") != null &&
-            Resources.Load<AudioClip>("PotentialForAnything") != null &&
-            Resources.Load<AudioClip>("DiscoDescent") != null &&
-            Resources.Load<AudioClip>("GameplayMusic") != null;
+            ActiveSoundtrack.All(name => Resources.Load<AudioClip>(name) != null);
 
         private static void Near(float actual, float expected, string message) => Check(Mathf.Abs(actual - expected) < .0001f, message);
         private static void Check(bool condition, string message)

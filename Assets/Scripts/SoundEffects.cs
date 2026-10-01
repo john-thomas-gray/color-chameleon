@@ -38,7 +38,8 @@ namespace CandyCruisers
         public event Action<SoundEffect, float> CuePlayed;
         private static readonly int[] MajorArpeggio = { 0, 4, 7, 12, 16, 19 };
         public static bool IsPlayableEffect(SoundEffect effect) => effect != SoundEffect.RedFire &&
-            effect != SoundEffect.GreenStep && effect != SoundEffect.GreenDash;
+            effect != SoundEffect.GreenStep && effect != SoundEffect.GreenDash &&
+            effect != SoundEffect.WaveSpawn;
         // Repeat two octaves rather than clamp later notes to a non-chord pitch.
         public static float DefeatPitch(int multiplier) => Mathf.Pow(2, MajorArpeggio[(Mathf.Max(1, multiplier) - 1) % MajorArpeggio.Length] / 12f);
 

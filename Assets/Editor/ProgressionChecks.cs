@@ -11,27 +11,55 @@ namespace CandyCruisers.Editor
         {
             var progress = new RunProgress();
             Check(progress.Level == 1 && progress.Score == 0, "Fresh run");
-            Check(progress.RegisterClear(17, false) == 1700 && progress.Level == 1, "Before threshold");
+            Check(progress.RegisterClear(19, false) == 1900 && progress.Level == 1 && progress.EarnedLevel == 1,
+                "Nineteen defeats remain below the level-two threshold");
             progress.RegisterClear(1, false);
-            Check(progress.Level == 2 && progress.NextThreshold == 54, "First level at 18");
-            progress.RegisterClear(90, false);
-            Check(progress.Level == 4 && progress.Defeated == 108, "Multiple thresholds in one clear");
-            progress.RegisterClear(162, false);
-            Check(progress.Level == 6 && progress.BatchRows == 5 && progress.RowWidth == RunProgress.StandardRowWidth, "Purple level at 270");
+            Check(progress.Level == 1 && progress.EarnedLevel == 2 && progress.LevelUpPending &&
+                progress.ActiveLevelProgressFraction == 1 && progress.BankedLevelProgressFraction == 0,
+                "First threshold fills the bar but waits for fleet clear");
+            progress.RegisterClear(100, false);
+            Check(progress.Level == 1 && progress.EarnedLevel == 4 && progress.Defeated == 120,
+                "Multiple thresholds can bank during one wave without changing the active level");
+            Check(progress.RegisterClear(1, true) == 10100 && progress.Level == 4 && progress.NextThreshold == 200,
+                "Fleet clear jumps to the furthest earned level");
+            progress.RegisterClear(179, false);
+            Check(progress.Level == 4 && progress.EarnedLevel == 6 && progress.BatchRows == 5 &&
+                progress.RowWidth == RunProgress.StandardRowWidth, "Purple level banks without changing current-row tuning");
+            progress.RegisterClear(1, true);
+            Check(progress.Level == 6 && progress.BatchRows == 5 && progress.RowWidth == RunProgress.StandardRowWidth,
+                "Fleet clear commits the banked Purple level");
             var wideProgress = new RunProgress();
             while (wideProgress.Level < RunProgress.WideRowsStartLevel)
-                wideProgress.RegisterClear(wideProgress.NextThreshold - wideProgress.Defeated, false);
+                wideProgress.RegisterClear(wideProgress.NextThreshold - wideProgress.Defeated, true);
             Check(wideProgress.Level == 7 && wideProgress.BatchRows == 6 && wideProgress.RowWidth == RunProgress.WideRowWidth &&
                 wideProgress.BatchEnemies == 36, "Level seven expands refill rows to six wide");
-            long before = progress.Score;
-            Check(progress.RegisterClear(0, true) == 0 && progress.Score == before, "No duplicate empty-clear bonus");
-            Check(progress.RegisterClear(2, true) == 60300, "Per-enemy scaling and fleet bonus");
+            long before = wideProgress.Score;
+            Check(wideProgress.RegisterClear(0, true) == 0 && wideProgress.Score == before, "No duplicate empty-clear bonus");
+            var bonusProgress = new RunProgress();
+            while (bonusProgress.Level < 6)
+                bonusProgress.RegisterClear(bonusProgress.NextThreshold - bonusProgress.Defeated, true);
+            Check(bonusProgress.RegisterClear(2, true) == 60300, "Per-enemy scaling and fleet bonus");
             var weighted = new RunProgress();
             Check(weighted.RegisterClear(5, false, 11) == 1100 && weighted.Defeated == 5,
                 "Branch digits 1,2,2,3,3 multiply score without multiplying defeats");
-            weighted.RegisterClear(12, false);
-            Check(weighted.RegisterClear(2, true, 3) == 10300 && weighted.Level == 2 && weighted.Defeated == 19,
+            weighted.RegisterClear(13, false);
+            Check(weighted.RegisterClear(2, true, 3) == 10300 && weighted.Level == 2 && weighted.Defeated == 20,
                 "Weighted clear uses pre-clear level and leaves fleet bonus unmultiplied");
+            var progressBar = new Rect(10, 20, 100, 9);
+            Check(Mathf.Abs(GameSession.LevelProgressFillRect(progressBar, 2).width - progressBar.width) < .001f &&
+                Mathf.Abs(GameSession.LevelProgressBankedRect(progressBar, .35f).width - 35) < .001f,
+                "Level progress bar clamps the filled current bar and tracks banked next-bar progress");
+            Check(GameSession.LevelProgressGlowRect(progressBar, 1).width > GameSession.LevelProgressGlowRect(progressBar, 0).width,
+                "Pending level progress glow swells on the beat");
+            var swollen = GameSession.LevelProgressSolidRect(progressBar, true, 1);
+            Check(swollen.width == progressBar.width + 6 && swollen.height == progressBar.height + 6 &&
+                swollen.center == progressBar.center, "The pending solid fill expands around its center on the beat");
+            Check(GameSession.LevelProgressSolidRect(progressBar, true, 0) == progressBar &&
+                GameSession.LevelProgressSolidRect(progressBar, false, 1) == progressBar,
+                "Solid fill returns to resting size between beats and stops pulsing after the level commits");
+            var bankedRect = GameSession.LevelProgressBankedRect(swollen, .35f);
+            Check(swollen.Contains(bankedRect.min) && swollen.Contains(bankedRect.max - Vector2.one * .001f),
+                "Banked progress stays inside the expanded solid fill");
             for (int level = 1; level <= 7; level++)
             foreach (EnemyColor color in Enum.GetValues(typeof(EnemyColor)))
                 Check(RunProgress.IsUnlocked(color, level) == (level >=
@@ -51,10 +79,11 @@ namespace CandyCruisers.Editor
                 grid.ConfigureAbilities(AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/Red Missile.prefab"),
                     AssetDatabase.LoadAssetAtPath<Sprite>("Assets/Art/ShieldArc.png"));
                 var session = root.AddComponent<GameSession>();
-                session.Configure(GameObject.Find("Player").GetComponent<PlayerMovement>());
+                var scenePlayer = GameObject.Find("Player");
+                session.Configure(scenePlayer != null ? scenePlayer.GetComponent<PlayerMovement>() : null);
                 for (int level = 1; level <= 6; level++)
                 {
-                    if (level > 1) session.Progress.RegisterClear(session.Progress.NextThreshold - session.Progress.Defeated, false);
+                    if (level > 1) session.Progress.RegisterClear(session.Progress.NextThreshold - session.Progress.Defeated, true);
                     Check(spawner.SpawnBatch(10), "Spawn unlocked fleet");
                     foreach (var enemy in root.GetComponentsInChildren<GridEnemy>())
                         Check(RunProgress.IsUnlocked(enemy.Color, level), "No premature row unlock");

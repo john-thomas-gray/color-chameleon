@@ -8,6 +8,7 @@ namespace CandyCruisers.Editor
     public static class GameplaySetup
     {
         public const string ScenePath = "Assets/Scenes/Gameplay.unity";
+        private const string EnemySpritePath = "Assets/Art/space-invader-normal.png";
 
         [MenuItem("Candy Cruisers/Create Gameplay Scene")]
         public static void Create()
@@ -17,9 +18,10 @@ namespace CandyCruisers.Editor
             Directory.CreateDirectory("Assets/Scenes");
             Directory.CreateDirectory("Assets/Prefabs");
             var stars = ImportSprite("Assets/Art/galaxy.jpeg");
-            var blue = CreateEnemy("Blue Enemy", ImportSprite("Assets/Art/blueberry.png"),
+            var enemySprite = ImportSprite(EnemySpritePath, true);
+            var blue = CreateEnemy("Blue Enemy", enemySprite,
                 new Color(0.22f, 0.64f, 1f));
-            var red = CreateEnemy("Red Enemy", ImportSprite("Assets/Art/Apple.png"),
+            var red = CreateEnemy("Red Enemy", enemySprite,
                 new Color(1f, 0.26f, 0.33f));
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             var cameraObject = new GameObject("Main Camera", typeof(Camera), typeof(GameplayFraming));
@@ -50,13 +52,14 @@ namespace CandyCruisers.Editor
             AssetDatabase.SaveAssets();
         }
 
-        private static Sprite ImportSprite(string path)
+        private static Sprite ImportSprite(string path, bool pointFilter = false)
         {
             AssetDatabase.ImportAsset(path);
             var importer = (TextureImporter)AssetImporter.GetAtPath(path);
             importer.textureType = TextureImporterType.Sprite;
             importer.spriteImportMode = SpriteImportMode.Single;
             importer.spritePixelsPerUnit = 256;
+            if (pointFilter) importer.filterMode = FilterMode.Point;
             importer.mipmapEnabled = false;
             importer.alphaIsTransparency = true;
             importer.SaveAndReimport();

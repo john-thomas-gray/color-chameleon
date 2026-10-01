@@ -12,8 +12,10 @@ namespace CandyCruisers
         private Sprite sprite;
         private FatalImpactBackdrop impact;
         private SortingGroup heldPlayer;
+        private Transform heldArtwork;
         private bool ownsPlayerGroup, playerGroupEnabled;
         private int playerSortingLayer, playerSortingOrder;
+        private Vector3 playerLocalPosition, playerLocalCenter;
 
         public static GameOverBlackout Create(Transform owner, PresentationCue death)
         {
@@ -33,6 +35,10 @@ namespace CandyCruisers
         public void HoldPlayer(Transform artwork)
         {
             ReleasePlayer();
+            if (artwork == null) return;
+            heldArtwork = artwork;
+            playerLocalPosition = artwork.localPosition;
+            playerLocalCenter = VisualCenter(artwork);
             heldPlayer = artwork.GetComponent<SortingGroup>();
             ownsPlayerGroup = heldPlayer == null;
             if (ownsPlayerGroup) heldPlayer = artwork.gameObject.AddComponent<SortingGroup>();
@@ -73,6 +79,8 @@ namespace CandyCruisers
                 if (Application.isPlaying) Destroy(heldPlayer);
                 else DestroyImmediate(heldPlayer);
             }
+            if (heldArtwork != null) heldArtwork.localPosition = playerLocalPosition;
+            heldArtwork = null;
             heldPlayer = null;
             SortingGroup.UpdateAllSortingGroups();
         }
@@ -86,8 +94,30 @@ namespace CandyCruisers
         {
             cover.color = new Color(0, 0, 0, Mathf.Clamp01(opacity));
             cover.enabled = opacity > 0;
+            MoveHeldPlayer(opacity);
             if (impact != null) impact.Present(impactAge);
             LateUpdate();
+        }
+
+        private void MoveHeldPlayer(float opacity)
+        {
+            var camera = Camera.main;
+            if (heldArtwork == null || camera == null) return;
+            float t = Mathf.SmoothStep(0, 1, Mathf.Clamp01(opacity));
+            var start = heldArtwork.parent != null ? heldArtwork.parent.TransformPoint(playerLocalPosition) : playerLocalPosition;
+            var currentCenterOffset = heldArtwork.TransformPoint(playerLocalCenter) - heldArtwork.position;
+            float depth = camera.WorldToViewportPoint(start + currentCenterOffset).z;
+            var center = camera.ViewportToWorldPoint(new Vector3(.5f, .5f, depth));
+            heldArtwork.position = Vector3.Lerp(start, center - currentCenterOffset, t);
+        }
+
+        private static Vector3 VisualCenter(Transform artwork)
+        {
+            var renderers = artwork.GetComponentsInChildren<SpriteRenderer>(true);
+            if (renderers.Length == 0) return Vector3.zero;
+            var bounds = renderers[0].bounds;
+            for (int i = 1; i < renderers.Length; i++) bounds.Encapsulate(renderers[i].bounds);
+            return artwork.InverseTransformPoint(bounds.center);
         }
 
         private void LateUpdate()

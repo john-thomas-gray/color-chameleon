@@ -6,6 +6,7 @@
 Builds/
 TestResults/
 .DS_Store
+mono_crash.*.json
 *.csproj
 *.sln
 *.slnx
