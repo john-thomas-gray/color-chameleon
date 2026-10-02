@@ -62,7 +62,7 @@ namespace CandyCruisers.Editor
             Application.runInBackground = true;
             // Desktop focus can change while this unattended suite is running.
             // Explicit pause assertions below (phases 17-20) retain full control.
-            if (phase < 15 || phase == 61)
+            if (phase < 15 || phase == 61 || phase == 81)
             {
                 var activeSession = UnityEngine.Object.FindFirstObjectByType<GameSession>();
                 if (activeSession != null && activeSession.IsPaused) activeSession.Resume();
@@ -269,6 +269,13 @@ namespace CandyCruisers.Editor
                     phase = 8;
                 }
                 else if (phase == 8 && player.Alive)
+                {
+                    Require(player.ReplacementFalling && player.Invulnerable && !player.RespawnProtectionActive && player.Fire(),
+                        "Player can fire after the jump apex before landing protection");
+                    tongue.Cancel();
+                    phase = 81;
+                }
+                else if (phase == 81 && !player.ReplacementFalling)
                 {
                     Require(player.Invulnerable && !player.Hit() && player.Fire(), "Player respawns protected and can fire");
                     tongue.Cancel();

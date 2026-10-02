@@ -35,6 +35,7 @@ namespace CandyCruisers
             new Song("IntergalacticEmotionalBreakdown", 143.55f, .26703f, 0),
             new Song("ShootingRobotsInSpace", 136f, .62694f, 0),
             new Song("VertexStage1", 143.55f, .22059f, 0),
+            new Song("Contact", 123.05f, .05805f, 2, 0),
             new Song(CountingResourceName, DefaultBeatsPerMinute, .08f, 0, 0)
         };
         private readonly System.Collections.Generic.List<int> remainingSongs = new System.Collections.Generic.List<int>();
@@ -59,15 +60,18 @@ namespace CandyCruisers
             }
         }
         public int CurrentRelativeMajorTonic => CurrentSong?.relativeMajorTonic ?? customTrackRelativeMajorTonic;
-        public int CurrentDownbeatOffsetBeats => CurrentSong?.downbeatOffsetBeats ?? DownbeatOffsetBeats;
-        private float FixedBeatDuration => 60f / Mathf.Max(1, CurrentSong?.beatsPerMinute ?? beatsPerMinute);
+        public int CurrentDownbeatOffsetBeats => PreviewTime.HasValue ? DownbeatOffsetBeats : CurrentSong?.downbeatOffsetBeats ?? DownbeatOffsetBeats;
+        public float? PreviewTime { get; set; }
+        public float PreviewTempo { get; set; } = 120;
+        private float FixedBeatDuration => 60f / Mathf.Max(1, PreviewTime.HasValue ? PreviewTempo : CurrentSong?.beatsPerMinute ?? beatsPerMinute);
         public float CurrentTempo => 60f / BeatDuration;
-        public float CurrentBeatOffset => CurrentBeatMap?.FirstBeatTime ?? CurrentSong?.beatOffsetSeconds ?? beatOffsetSeconds;
+        public float CurrentBeatOffset => PreviewTime.HasValue ? 0 : CurrentBeatMap?.FirstBeatTime ?? CurrentSong?.beatOffsetSeconds ?? beatOffsetSeconds;
         public bool UsesBeatMap => CurrentBeatMap != null;
         private SongBeatMap CurrentBeatMap
         {
             get
             {
+                if (PreviewTime.HasValue) return null;
                 var clip = Source.clip;
                 if (clip == null) return null;
                 var song = CurrentSong;
@@ -84,7 +88,7 @@ namespace CandyCruisers
         public const float DefaultBeatsPerMinute = 115.03f;
         [SerializeField, Min(1)] private float beatsPerMinute = DefaultBeatsPerMinute;
         [SerializeField] private float beatOffsetSeconds = .08f;
-        public const float DefaultVolume = .05f;
+        public const float DefaultVolume = .10f;
         public const float DeathMinimumPitch = .04f;
         [SerializeField] private GameSession session;
         [SerializeField] private AudioClip track;
@@ -98,8 +102,9 @@ namespace CandyCruisers
         private bool warnedFailedLoad;
 
         public AudioSource Source { get { EnsureSource(); return source; } }
-        public float PlaybackSeconds => Source.clip != null ?
-            Source.timeSamples / (float)Mathf.Max(1, Source.clip.frequency) : 0;
+        public bool BeatClockRunning => PreviewTime.HasValue || Source.isPlaying;
+        public float PlaybackSeconds => PreviewTime ?? (Source.clip != null ?
+            Source.timeSamples / (float)Mathf.Max(1, Source.clip.frequency) : 0);
         public float BeatDuration => CurrentBeatMap?.DurationAtTime(PlaybackSeconds) ?? FixedBeatDuration;
         public static float BeatPulse(float beatPosition, bool offbeat = false) =>
             Mathf.Pow(Mathf.Max(0, Mathf.Cos((beatPosition - (offbeat ? .5f : 0)) * Mathf.PI * 2)), 4);
@@ -197,6 +202,7 @@ namespace CandyCruisers
         public bool InGameplayRun => session != null &&
             (session.State == GameSession.RunState.Playing || session.State == GameSession.RunState.Refilling);
         public bool ShouldPlayMusic => session != null && !session.IsPaused &&
+            !session.OpeningWarningActive &&
             (InGameplayRun || session.State == GameSession.RunState.MainMenu ||
                 session.State == GameSession.RunState.Dying && session.GameOverMusicGain > 0);
 
@@ -255,7 +261,17 @@ namespace CandyCruisers
         public void UpdatePlayback()
         {
             EnsureSource();
+            if (PreviewTime.HasValue) return;
             if (session == null) session = GetComponent<GameSession>();
+            if (session != null && session.OpeningWarningActive)
+            {
+                source.Stop();
+                source.clip = null;
+                wasInRun = false;
+                wasInMainMenu = false;
+                pausedSource = false;
+                return;
+            }
             if (session != null && (session.State == GameSession.RunState.Dying || session.State == GameSession.RunState.GameOver))
             {
                 // Keep the current recording in place; the captured fade clock drives the tape stop.

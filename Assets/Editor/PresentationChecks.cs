@@ -122,6 +122,22 @@ namespace CandyCruisers.Editor
                 player.RefreshColor();
                 Check(player.Fire() && !player.Fire() && playerFires == 1,
                     "Player cue follows accepted fire only; rejected input does not animate");
+                var bulb = tongue.TipBulb;
+                var tongueLine = tongue.GetComponent<LineRenderer>();
+                Check(bulb != null && bulb.enabled && bulb.transform.parent == tongue.transform,
+                    "Active tongue has a separate replaceable tip bulb");
+                Check(bulb.transform.localPosition.y > tongue.Length &&
+                    Mathf.Abs(bulb.transform.localScale.x - tongueLine.endWidth * TongueShot.TipBulbWidthMultiplier) < .0001f,
+                    "Tip bulb sits beyond the line and scales from its authored end width");
+                Check(SameColor(bulb.color, tongueLine.colorGradient.Evaluate(1)),
+                    "Ordinary bulb follows the tongue endpoint color");
+                tongue.Cancel();
+                Check(!bulb.enabled, "Tip bulb hides when the tongue finishes");
+
+                Check(tongue.TryFire(EnemyColor.Red, 1, true), "Magic tongue starts for bulb presentation");
+                Check(Mathf.Abs(bulb.transform.localScale.x - tongueLine.endWidth * TongueShot.TipBulbWidthMultiplier) < .0001f &&
+                    SameColor(bulb.color, tongueLine.colorGradient.Evaluate(1)),
+                    "Magic bulb scales with the thicker tongue and follows its endpoint color");
                 tongue.Cancel();
             });
             // Detached presentation objects have no combat components and must not leak from fixtures.
@@ -131,6 +147,8 @@ namespace CandyCruisers.Editor
         }
         private static void Check(bool value, string message)
         { if (!value) throw new Exception("Presentation check failed: " + message); }
+        private static bool SameColor(Color a, Color b) =>
+            Mathf.Abs(a.r - b.r) < .01f && Mathf.Abs(a.g - b.g) < .01f && Mathf.Abs(a.b - b.b) < .01f;
 
         public static void CapturePreview()
         {
@@ -141,6 +159,9 @@ namespace CandyCruisers.Editor
             foreach (var ability in grid.GetComponentsInChildren<EnemyAbilities>()) ability.Tick(1);
             var player = GameObject.Find("Player").GetComponent<PlayerMovement>();
             player.RefreshColor();
+            var tongue = player.GetComponentInChildren<TongueShot>();
+            tongue.TryFire(EnemyColor.Green, 2.2f);
+            tongue.Tick(.12f);
             var firing = PresentationCue.Spawn(null, PresentationCue.Kind.Fire,
                 CharacterVisuals.Ensure(player.gameObject).Body, player.ReadyColor.Value, 1);
             firing.Tick(.06f);

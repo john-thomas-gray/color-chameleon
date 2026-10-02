@@ -12,6 +12,7 @@ namespace CandyCruisers.Editor
             foreach (var player in existingPlayers) player.gameObject.SetActive(false);
             try
             {
+                CheckRespawnShots();
                 foreach (float side in new[] { -2f, 2f })
                 SpecialEnemyChecks.Fixture((grid, player, tongue) =>
                 {
@@ -99,7 +100,46 @@ namespace CandyCruisers.Editor
                 });
             }
             finally { foreach (var player in existingPlayers) if (player != null) player.gameObject.SetActive(true); }
-            Debug.Log("Aimed Red checks passed: warning turn, launch direction, fixed flight, return, pause, color reset and ordinary fire.");
+            Debug.Log("Aimed Red checks passed: warning turn, downward respawn shots, post-landing aim, launch direction, fixed flight, return, pause, color reset and ordinary fire.");
+        }
+
+        private static void CheckRespawnShots()
+        {
+            foreach (float recoveryAge in new[] { 0, PlayerLifeIcons.ApexSeconds + .05f, PlayerLifeIcons.Duration - .01f })
+            SpecialEnemyChecks.Fixture((grid, player, tongue) =>
+            {
+                var red = ProgressionChecks.Add(grid, EnemyColor.Red, 2, 0);
+                ProgressionChecks.Add(grid, EnemyColor.Red, 1, 0);
+                ProgressionChecks.Add(grid, EnemyColor.Red, 3, 0);
+                grid.RefreshSpecials();
+                player.transform.position = new Vector3(2, -4.6f, 0);
+                var ability = red.GetComponent<EnemyAbilities>();
+                ability.Tick(ability.CooldownRemaining - .2f);
+                Check(Quaternion.Angle(red.Visuals.Body.transform.localRotation, Quaternion.identity) > 1,
+                    "Special Red begins aiming before the player is hit");
+                Check(player.Hit(), "Fixture starts the replacement jump");
+                player.TickSurvival(recoveryAge);
+                var before = UnityEngine.Object.FindObjectsByType<EnemyMissile>(FindObjectsSortMode.None);
+                ability.Tick(ability.CooldownRemaining + .001f);
+                var missile = NewMissiles(before).Single();
+                Check(missile.Aimed && !missile.Homing &&
+                    Vector3.Angle(missile.transform.rotation * Vector3.down, Vector3.down) < .01f &&
+                    Vector3.Angle(red.Visuals.Body.transform.rotation * Vector3.down, Vector3.down) < .01f,
+                    "A warning interrupted by respawn fires straight down before the apex and throughout the fall");
+                var origin = missile.transform.position;
+                missile.Tick(.05f);
+                Check(Vector3.Distance(missile.transform.position, origin + Vector3.down * .175f) < .001f,
+                    "Respawn shots preserve special-Red speed while flying straight down");
+                player.TickSurvival(PlayerLifeIcons.Duration - recoveryAge + .001f);
+                Check(!player.ReplacementFalling && player.RespawnProtectionActive, "Replacement has landed with protection");
+                player.transform.position = new Vector3(-2, -4.6f, 0);
+                before = UnityEngine.Object.FindObjectsByType<EnemyMissile>(FindObjectsSortMode.None);
+                ability.Tick(ability.CooldownRemaining + .001f);
+                var aimed = NewMissiles(before).Single();
+                Check(Vector3.Angle(aimed.transform.rotation * Vector3.down,
+                    player.transform.position - red.transform.position) < .01f,
+                    "Aimed fire resumes on landing without waiting for flashing protection to expire");
+            });
         }
 
         private static EnemyMissile[] NewMissiles(EnemyMissile[] before) =>

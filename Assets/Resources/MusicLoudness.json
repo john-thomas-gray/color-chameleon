@@ -11,6 +11,13 @@
       "gainDb": -6.28
     },
     {
+      "resourceName": "Contact",
+      "sourceSha256": "c7548b8e3983c54c6963b421817cf817f2539288cb66325806ddeddc4e59fbd9",
+      "integratedLufs": -10.62,
+      "truePeakDbtp": -0.12,
+      "gainDb": -5.17
+    },
+    {
       "resourceName": "CountingMetronome",
       "sourceSha256": "ff6857bc483a87d1bac375766265599d66a1eae5fc09ba187cf4b705c661e915",
       "integratedLufs": -15.79,

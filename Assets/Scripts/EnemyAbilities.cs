@@ -181,7 +181,9 @@ namespace CandyCruisers
             {
                 float used = Mathf.Min(seconds, burstRemaining);
                 burstRemaining -= used;
+                float before = transform.position.x;
                 grid.GetComponent<EnemyGridMovement>()?.AdvanceDistance(used / .18f * .1f);
+                presentation.SetDashDirection(transform.position.x - before);
                 if (Suspended || !isActiveAndEnabled) return;
             }
             bool startGreenSpin = false;
@@ -196,7 +198,7 @@ namespace CandyCruisers
                 }
             }
             var player = enemy.Color == EnemyColor.Red ? FindFirstObjectByType<PlayerMovement>() : null;
-            Vector3 aimDirection = player != null && player.Alive
+            Vector3 aimDirection = player != null && player.Alive && !player.ReplacementFalling
                 ? player.transform.position - transform.position : Vector3.down;
             aimDirection.z = 0;
             aimDirection = aimDirection.sqrMagnitude > .000001f ? aimDirection.normalized : Vector3.down;
@@ -242,7 +244,7 @@ namespace CandyCruisers
             RefreshVisuals();
             presentation.Tick(seconds, enemy.Color, Warning ? 1 : 0);
             // Start after the presentation tick so the completed windup cannot consume the new spin.
-            if (startGreenSpin) presentation.SpinGreen();
+            if (startGreenSpin) presentation.DashGreen(grid.GetComponent<EnemyGridMovement>().Direction);
             if (awaitingSpawnShield && !presentation.IsPhasing)
             {
                 awaitingSpawnShield = false;

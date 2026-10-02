@@ -177,6 +177,16 @@ namespace CandyCruisers.Editor
                 Check(grid.Model.Count == 0 && session.State == GameSession.RunState.Refilling,
                     "Next fleet waits until the earned bars have run out");
                 session.Tick(longFrame ? 100 : .002f);
+                if (partial)
+                {
+                    Check(removals == bars && grid.Model.Count == session.Progress.BatchEnemies &&
+                        session.State == GameSession.RunState.Playing && arrivals == 1,
+                        "Partial bars power down together and the next fleet begins on the fallback downbeat");
+                    session.Tick(1);
+                    Check(arrivals == 1 && !session.ClearCelebration.Active && !player.CelebrationColor.HasValue,
+                        "The partial refill completes once without a post-bar hold");
+                    return;
+                }
                 Check(session.ClearCelebration.Finished && removals == bars && grid.Model.Count == 0 && arrivals == 0 &&
                     !session.ClearCelebration.Visible(session.ClearCelebration.LastColor.Value),
                     "Removing the final bar never spawns the next fleet in the same update, even after a long frame");
@@ -207,7 +217,7 @@ namespace CandyCruisers.Editor
             {
                 float minimumBarBeats = GameSession.MinimumColorClearBarSequenceBeats(bars);
                 float spawnBeat = GameSession.RefillDownbeat(clearBeat, minimumBarBeats, full, lifeAwarded: lifeAwarded);
-                int postBarBeats = lifeAwarded ? 2 : 1;
+                int postBarBeats = lifeAwarded ? 2 : full ? 1 : 0;
                 float barBeats = GameSession.ColorClearBarSequenceBeats(clearBeat, spawnBeat, postBarBeats);
                 float animationStart = spawnBeat - barBeats - postBarBeats;
                 Near((spawnBeat - GameplayMusicPlayer.DownbeatOffsetBeats) % GameplayMusicPlayer.BeatsPerMeasure, 0,
@@ -219,7 +229,7 @@ namespace CandyCruisers.Editor
                 Check(spawnBeat - GameplayMusicPlayer.BeatsPerMeasure < clearBeat + minimumBarBeats + postBarBeats,
                     "The earliest eligible downbeat is chosen without adding an unnecessary measure");
                 Near(animationStart + barBeats, spawnBeat - postBarBeats,
-                    "An earned life reserves exactly one extra beat between the last bar and spawning");
+                    "The bar choreography ends at the correct beat before spawning");
             }
             Near(GameSession.RefillDownbeat(7, GameSession.MinimumColorClearBarSequenceBeats(6), true), 9,
                 "A full bar sequence can use the next downbeat without a mandatory hold");
@@ -271,14 +281,16 @@ namespace CandyCruisers.Editor
                     grid.ClearMatchingChain(green.Id, green.Color);
                     float began = music.PlaybackSeconds;
                     float clearBeat = music.BeatPosition;
+                    bool partialSet = partial && !single;
                     int bars = single ? 1 : partial ? 2 : 3;
                     float minimumBarBeats = GameSession.MinimumColorClearBarSequenceBeats(bars);
-                    float downbeat = GameSession.RefillDownbeat(clearBeat, minimumBarBeats, !partial,
+                    float downbeat = GameSession.RefillDownbeat(clearBeat, minimumBarBeats, !partialSet,
                         music.CurrentDownbeatOffsetBeats);
-                    float barBeats = GameSession.ColorClearBarSequenceBeats(clearBeat, downbeat, 1);
+                    int postBarBeats = partialSet ? 0 : 1;
+                    float barBeats = GameSession.ColorClearBarSequenceBeats(clearBeat, downbeat, postBarBeats);
                     float barStep = GameSession.ColorClearBarStepBeats(barBeats, bars);
-                    float startBeat = downbeat - barBeats - 1;
-                    Near(session.ClearCelebration.PlaybackDuration, music.SecondsAtBeat(downbeat - 1) - began,
+                    float startBeat = downbeat - barBeats - postBarBeats;
+                    Near(session.ClearCelebration.PlaybackDuration, music.SecondsAtBeat(downbeat - postBarBeats) - began,
                         "Alignment time is included before the removals, including through tempo changes");
                     Near(startBeat, clearBeat, "Bar power-down stretches from the clear moment toward the planned downbeat");
                     var resting = new Rect(0, 100, 40, 5);
@@ -289,7 +301,16 @@ namespace CandyCruisers.Editor
                             "No power-down growth begins before music advances into the first dynamic slot");
                     SeekBeat(music, startBeat + barStep * .75f);
                     session.Tick(.001f);
-                    Check(removals == 0 && session.ClearCelebration.Color != Color.white,
+                    if (partialSet)
+                    {
+                        var blueSpike = session.ClearCelebration.Present(EnemyColor.Blue, resting);
+                        var greenSpike = session.ClearCelebration.Present(EnemyColor.Green, resting);
+                        Check(removals == 0 && session.ClearCelebration.Color == Color.white &&
+                            blueSpike.height > resting.height && blueSpike == greenSpike &&
+                            blueSpike.x == resting.x && blueSpike.width == resting.width,
+                            "Partial clears spike all earned bars vertically while waiting for the downbeat");
+                    }
+                    else Check(removals == 0 && session.ClearCelebration.Color != Color.white,
                         "The first bar gets its full color-flash animation before disappearing");
                     session.Pause();
                     var held = player.DisplayColor;
@@ -299,6 +320,21 @@ namespace CandyCruisers.Editor
                     // Resume may restore the configured soundtrack; continue the same controlled clock.
                     music.Source.clip = clip;
                     music.Source.Play();
+                    if (partialSet)
+                    {
+                        SeekBeat(music, downbeat - .01f);
+                        session.Tick(.001f);
+                        Check(removals == 0 && arrivals == 0 && !session.ClearCelebration.Finished,
+                            "Partial bars stay powered through the last moment before the downbeat");
+                        SeekBeat(music, downbeat + .01f);
+                        session.Tick(.001f);
+                        Check(removals == bars && arrivals == 1 && session.State == GameSession.RunState.Playing &&
+                            grid.Model.Count == session.Progress.BatchEnemies,
+                            "All partial bars power down together and the next fleet starts on the planned downbeat");
+                        session.Tick(100);
+                        Check(arrivals == 1, "The planned arrival fires exactly once");
+                        return;
+                    }
                     for (int i = 0; i < bars; i++)
                     {
                         float removalBeat = startBeat + (i + 1) * barStep;

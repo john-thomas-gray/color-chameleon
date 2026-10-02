@@ -29,8 +29,8 @@ namespace CandyCruisers
                 case EnemyColor.Blue: return new Vector2(3, 10);
                 case EnemyColor.Green: return new Vector2(8, 10);
                 case EnemyColor.Purple: return new Vector2(8, 12);
-                case EnemyColor.Yellow: return new Vector2(2, 5);
-                case EnemyColor.Orange: return new Vector2(2, 2);
+                case EnemyColor.Yellow: return new Vector2(2, 12);
+                case EnemyColor.Orange: return new Vector2(1, 1);
                 default: return new Vector2(3, 10);
             }
         }
@@ -40,12 +40,12 @@ namespace CandyCruisers
         {
             switch (color)
             {
-                case EnemyColor.Blue: return new Vector2(3, 10);
-                case EnemyColor.Green: return new Vector2(8, 10);
-                case EnemyColor.Purple: return new Vector2(8, 12);
-                case EnemyColor.Yellow: return new Vector2(2, 5);
-                case EnemyColor.Orange: return new Vector2(2, 2);
-                default: return new Vector2(3, 10);
+                case EnemyColor.Blue: return new Vector2(1, 1);
+                case EnemyColor.Green: return new Vector2(2, 4);
+                case EnemyColor.Purple: return new Vector2(8, 24);
+                case EnemyColor.Yellow: return new Vector2(2, 4);
+                case EnemyColor.Orange: return new Vector2(2, 1);
+                default: return new Vector2(3, 5);
             }
         }
     }

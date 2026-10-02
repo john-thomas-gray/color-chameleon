@@ -7,6 +7,46 @@ namespace CandyCruisers.Editor
 {
     public static class SpecialEnemyChecks
     {
+        public static void CaptureShockPreview()
+        {
+            UnityEditor.SceneManagement.EditorSceneManager.OpenScene(GameplaySetup.ScenePath);
+            var player = GameObject.Find("Player").GetComponent<PlayerMovement>();
+            var art = CharacterVisuals.Ensure(player.gameObject);
+            player.gameObject.AddComponent<PlayerSlimeVisual>().Configure(art);
+            player.transform.position = Vector3.zero;
+            player.SetCelebrationColor(EnemyPalette.Get(EnemyColor.Green));
+            GameObject.Find("Playfield Border").GetComponent<PlayfieldFrame>().RefreshPlayerClip();
+            var camera = Camera.main;
+            camera.GetComponent<GameplayFraming>().enabled = false;
+            camera.transform.position = new Vector3(0, .1f, -10);
+            camera.orthographicSize = .8f; camera.aspect = 1;
+            camera.backgroundColor = new Color(.07f, .07f, .09f);
+            camera.ResetProjectionMatrix();
+            var effect = player.gameObject.AddComponent<PlayerShockVisual>();
+            effect.Begin(); effect.Tick(.04f); CaptureShockFrame(camera, "shock-impact");
+            effect.Tick(.15f); CaptureShockFrame(camera, "shock-soot");
+            effect.BeginRecovery(); effect.Tick(.07f); CaptureShockFrame(camera, "shock-blink");
+            effect.Tick(.3f); CaptureShockFrame(camera, "shock-cinders");
+            Debug.Log("Shock presentation previews captured.");
+        }
+        private static void CaptureShockFrame(Camera camera, string name)
+        {
+            var target = new RenderTexture(512, 512, 24);
+            var pixels = new Texture2D(512, 512, TextureFormat.RGB24, false);
+            var previous = RenderTexture.active;
+            try
+            {
+                camera.targetTexture = target; camera.Render(); RenderTexture.active = target;
+                pixels.ReadPixels(new Rect(0, 0, 512, 512), 0, 0); pixels.Apply();
+                System.IO.Directory.CreateDirectory("TestResults");
+                System.IO.File.WriteAllBytes("TestResults/" + name + ".png", pixels.EncodeToPNG());
+            }
+            finally
+            {
+                camera.targetTexture = null; RenderTexture.active = previous;
+                UnityEngine.Object.DestroyImmediate(target); UnityEngine.Object.DestroyImmediate(pixels);
+            }
+        }
         public static void CapturePreview()
         {
             UnityEditor.SceneManagement.EditorSceneManager.OpenScene(GameplaySetup.ScenePath);
@@ -51,6 +91,8 @@ namespace CandyCruisers.Editor
 
         public static void Run()
         {
+            CheckFeedingTendrils();
+            CheckShockVisual();
             var model = new GridModel();
             model.TryAdd(1, EnemyColor.Red, 2, 2);
             model.TryAdd(2, EnemyColor.Red, 1, 2);
@@ -82,9 +124,32 @@ namespace CandyCruisers.Editor
                     "Tier two uses special art and replaces individual shields with a group perimeter");
                 player.transform.position = new Vector3(lower.transform.position.x, -4.6f, 0);
                 Check(player.Fire(), "Fire a mismatched ordinary shot at the rigid shield");
-                tongue.Tick(.26f, grid);
-                Check(tongue.Active && tongue.Retracting && player.Stunned && player.DisplayColor == Color.gray && grid.Model.Count == 4,
-                    "Rigid shield survives and makes the player grey during retraction");
+                var beforeShock = player.DisplayColor;
+                int shockArrivals = 0;
+                tongue.ShieldShockArrived += () => shockArrivals++;
+                for (int i = 0; i < 1000 && !player.Stunned; i++) tongue.Tick(.001f, grid);
+                Check(tongue.ShockActive && player.Stunned && player.DisplayColor == beforeShock && shockArrivals == 0,
+                    "Shield contact launches electricity without graying the player before arrival");
+                var core = tongue.transform.Find("Shield shock core").GetComponent<LineRenderer>();
+                var glow = tongue.transform.Find("Shield shock glow").GetComponent<LineRenderer>();
+                float firstY = core.GetPosition(0).y;
+                float phase = tongue.ShockProgress;
+                tongue.Tick(0, grid); tongue.Tick(-1, grid);
+                Check(tongue.ShockProgress == phase, "Paused and negative ticks cannot advance the shield shock");
+                tongue.Tick(tongue.ShockDuration / 2, grid);
+                Check(tongue.ShockActive && core.enabled && glow.enabled && core.GetPosition(0).y < firstY &&
+                    core.startColor.b > .9f && glow.startWidth > core.startWidth && player.DisplayColor == beforeShock,
+                    "Blue-white electricity travels from the shield toward the still-colored player");
+                var trail = tongue.GetComponent<LineRenderer>().colorGradient;
+                Check(trail.Evaluate(.95f) == Color.gray && trail.Evaluate(.05f) != Color.gray,
+                    "Only the tongue behind the traveling shock becomes gray");
+                tongue.Tick(tongue.ShockDuration / 2, grid);
+                Check(!tongue.ShockActive && !core.enabled && !glow.enabled && shockArrivals == 1,
+                    "The electrical pulse arrives once and cleans up both visual layers");
+                Check(tongue.Active && tongue.Retracting && player.Stunned && player.DisplayColor == Color.white && grid.Model.Count == 4,
+                    "Rigid shield survives and flashes the player white on electrical impact");
+                player.GetComponent<PlayerShockVisual>().Tick(PlayerShockVisual.FlashSeconds + .01f);
+                Check(player.DisplayColor == Color.black, "Electrical impact leaves the player soot black");
                 var position = player.transform.position;
                 player.Move(1, 1);
                 player.BeginPointer(Vector2.zero);
@@ -99,10 +164,11 @@ namespace CandyCruisers.Editor
                 tongue.TryFire(EnemyColor.Red, 10); tongue.Tick(.26f, grid);
                 Check(player.Stunned, "Second mismatch also deflects without breaking shield");
                 player.CancelShot();
-                Check(!player.Stunned, "Cancellation cannot strand the player in grey stun");
+                Check(!player.Stunned && !tongue.ShockActive && !core.enabled && !glow.enabled,
+                    "Cancellation cannot strand the player in grey stun or leave electricity visible");
                 tongue.TryFire(EnemyColor.Blue, 10);
                 tongue.Tick(1, grid);
-                Check(grid.Model.ColorCount(EnemyColor.Blue) == 0 && grid.GroupShield.EdgeCount == 0 && !player.Stunned,
+                Check(grid.Model.ColorCount(EnemyColor.Blue) == 0 && grid.GroupShield.EdgeCount == 0 && !player.Stunned && !tongue.ShockActive,
                     "Matching Blue passes through and clears the shielded group and outline");
             });
 
@@ -336,6 +402,35 @@ namespace CandyCruisers.Editor
             Debug.Log("Special enemy checks passed: branching digits, cascade timing, promotion, Green activation spin, contours, deflection, stun recovery, matching/magic bypass and homing.");
         }
 
+        private static void CheckFeedingTendrils()
+        {
+            Fixture((grid, player, tongue) =>
+            {
+                var yellow = Add(grid, EnemyColor.Yellow, 0, 0);
+                Add(grid, EnemyColor.Yellow, 1, 0); Add(grid, EnemyColor.Yellow, 2, 0);
+                var target = Add(grid, EnemyColor.Purple, 0, 1);
+                grid.RefreshSpecials();
+                var ability = yellow.GetComponent<EnemyAbilities>();
+                Check(ability.BeginImitation(target), "Special Yellow starts its organic disguise");
+                ability.Tick(.5f);
+                var lines = yellow.GetComponentsInChildren<LineRenderer>()
+                    .Where(line => line.name.StartsWith("Disguise feeding tendril")).ToArray();
+                Check(lines.Length == 5 && lines.All(line => line.enabled && line.positionCount == 25),
+                    "Special Yellow draws multiple curved feeding tendrils");
+                Check(!grid.Model.TryGetImitationTarget(yellow.Id, out _),
+                    "Feeding artwork does not create a regular Yellow combat link");
+                var before = lines[0].colorGradient.colorKeys.Select(key => key.color).ToArray();
+                ability.Tick(.25f);
+                Check(!lines[0].colorGradient.colorKeys.Select(key => key.color).SequenceEqual(before),
+                    "Neighbor color visibly travels through the tendrils");
+                ability.Tick(EnemyAbilities.ImitationSeconds - .75f);
+                Check(!ability.IsTransforming && ability.IsDisguised && lines.All(line => !line.enabled),
+                    "Tendrils end at the normal imitation duration while the disguise remains");
+                ability.RevealDisguise(EnemyColor.Red);
+                Check(lines.All(line => !line.enabled), "Revealing a disguise leaves no feeding artwork behind");
+            });
+        }
+
         private static void CheckGreenSpin()
         {
             Fixture((grid, player, tongue) =>
@@ -403,6 +498,15 @@ namespace CandyCruisers.Editor
                     var presentation = green.GetComponent<EnemyPresentation>();
                     var body = green.Visuals.Body.transform;
                     var resting = body.localRotation;
+                    presentation.DashGreen(1);
+                    presentation.Tick(.01f, EnemyColor.Green, 0);
+                    var trails = green.GetComponentsInChildren<LineRenderer>().Where(line => line.name.StartsWith("Green dash trail")).ToArray();
+                    Check(trails.Length == 5 && trails.All(line => line.enabled &&
+                        line.GetPosition(2).x < line.GetPosition(0).x && line.endColor.a == 0),
+                        "Green dash streaks trail opposite rightward travel and fade along their length");
+                    presentation.SetDashDirection(-.1f); presentation.Tick(.01f, EnemyColor.Green, 0);
+                    Check(trails.All(line => line.GetPosition(2).x > line.GetPosition(0).x),
+                        "Dash trails follow a reversal in actual movement");
                     presentation.SpinGreen();
                     float elapsed = 0;
                     while (elapsed < EnemyPresentation.GreenSpinSeconds)
@@ -411,6 +515,8 @@ namespace CandyCruisers.Editor
                         elapsed += step;
                     }
                     Check(Quaternion.Angle(body.localRotation, resting) < .01f, "Spin completes with short or long frames");
+                    presentation.Tick(1, EnemyColor.Green, 0);
+                    Check(trails.All(line => !line.enabled), "Dash streaks clean up after fading");
                     presentation.SpinGreen();
                     presentation.Tick(.05f, EnemyColor.Green, 0);
                     var ability = green.GetComponent<EnemyAbilities>();
@@ -433,6 +539,55 @@ namespace CandyCruisers.Editor
         }
 
         private static GridEnemy Add(EnemyGrid grid, EnemyColor color, int x, int y) => ProgressionChecks.Add(grid, color, x, y);
+        private static void CheckShockVisual()
+        {
+            Fixture((grid, player, tongue) =>
+            {
+                VisualUpgrade.Upgrade(player.gameObject);
+                var art = CharacterVisuals.Ensure(player.gameObject);
+                player.Configure(grid, tongue, art.Body);
+                var eye = new GameObject("Eye", typeof(SpriteRenderer)).GetComponent<SpriteRenderer>();
+                var pupil = new GameObject("Pupil", typeof(SpriteRenderer)).GetComponent<SpriteRenderer>();
+                eye.transform.SetParent(art.Root, false); pupil.transform.SetParent(art.Root, false);
+                eye.sprite = pupil.sprite = art.Body.sprite;
+                eye.sortingOrder = art.Body.sortingOrder + 1;
+                pupil.sortingOrder = art.Body.sortingOrder + 2;
+                eye.transform.localScale = Vector3.one * .2f; pupil.transform.localScale = Vector3.one * .08f;
+                var eyeScale = eye.transform.localScale; var pupilScale = pupil.transform.localScale;
+                var bounds = player.HitBounds; var position = player.transform.position;
+                var shock = player.gameObject.AddComponent<PlayerShockVisual>();
+                shock.Begin();
+                Check(player.DisplayColor == Color.white && pupil.transform.localScale.x < pupilScale.x * .4f,
+                    "Shock impact flashes brightly and contracts pupils");
+                shock.Tick(.13f);
+                Check(player.DisplayColor == Color.black && shock.GetComponentsInChildren<LineRenderer>().Length >= 4,
+                    "Blackened player has an impact outline and smoke trails");
+                shock.BeginRecovery(); shock.Tick(.07f);
+                Check(eye.transform.localScale.y < eyeScale.y * .1f,
+                    "The soot recovery begins with a blink");
+                shock.Tick(.2f);
+                var pieces = player.GetComponentsInChildren<SpriteRenderer>().Where(part => part.name == "Soot cinder").ToArray();
+                Check(pieces.Length == 30 && pieces.Any(part => part.color.a < 1) && pieces.Any(part => part.color.a == 1),
+                    "Soot breaks off in staggered pieces while some still cover the new color");
+                Check(pieces.All(part => part.transform.IsChildOf(art.Root) && part.sortingOrder < eye.sortingOrder &&
+                    part.sortingOrder < pupil.sortingOrder), "All soot shares the player's rendering group and stays behind the face");
+                var lifeArt = new LifeSlimeArtwork(); lifeArt.Bind(art);
+                Check(lifeArt.PartCount == 3, "Temporary soot never becomes part of extra-life artwork");
+                lifeArt.Dispose();
+                var pose = pieces[0].transform.position;
+                shock.Tick(0); shock.Tick(-1);
+                Check(pieces[0].transform.position == pose, "Pause cannot advance the cinders");
+                shock.Tick(1);
+                Check(!shock.Active && pupil.transform.localScale == pupilScale && eye.transform.localScale == eyeScale &&
+                    player.HitBounds == bounds && player.transform.position == position,
+                    "Recovery restores the face without changing physics or movement");
+                Check(eye.sortingOrder == art.Body.sortingOrder + 1 && pupil.sortingOrder == art.Body.sortingOrder + 2,
+                    "Recovery restores the authored eye and pupil draw orders");
+                shock.Begin(); player.ResetForRun();
+                Check(!shock.Active && pupil.transform.localScale == pupilScale, "Restart clears soot, smoke and pupil changes");
+            });
+        }
+
         internal static void Fixture(Action<EnemyGrid, PlayerMovement, TongueShot> check)
         {
             var random = UnityEngine.Random.state;

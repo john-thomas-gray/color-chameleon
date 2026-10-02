@@ -7,9 +7,20 @@ namespace CandyCruisers
     public sealed class GameplayFraming : MonoBehaviour
     {
         private const int StarfieldCount = 10;
+        public const float PlayfieldBoundaryTopY = 5.5f;
+        public const float IphoneNotchDefaultTopInsetRatio = .055f;
+        public const float IphoneNotchMinimumTopInsetRatio = .025f;
+        public const float IphoneNotchTargetOverlapRatio = .012f;
+        public const float IphoneNotchMaxPlayfieldTopViewportY = .955f;
+        public const float IphoneNotchPortraitAspectLimit = .75f;
+        public const float IphoneNotchFallbackAspectLimit = .52f;
         public const float WaveCrunchCompression = .084f;
         private float waveCrunch;
         public float WaveCrunchScale => 1 - WaveCrunchCompression * waveCrunch;
+#if UNITY_EDITOR
+        public static bool ForceIphoneNotchOffsetForTests { get; set; }
+        public static float SimulatedIphoneTopInsetRatioForTests { get; set; } = IphoneNotchDefaultTopInsetRatio;
+#endif
 
         public void SetWaveCrunch(float amount)
         {
@@ -31,8 +42,10 @@ namespace CandyCruisers
         private SpriteRenderer crossFadeBackground;
         private Sprite[] starfields;
         private Texture2D[] starfieldTextures;
+        private Vector3 cameraHome;
         private Vector3 backgroundHome;
         private Quaternion backgroundHomeRotation = Quaternion.identity;
+        private bool cameraHomeCaptured;
         private bool backgroundHomeCaptured;
         private float backgroundPhase;
         private float spinAngle;
@@ -67,7 +80,11 @@ namespace CandyCruisers
         {
             BindSession(null);
             waveCrunch = 0;
-            if (view != null) view.ResetProjectionMatrix();
+            if (view != null)
+            {
+                view.ResetProjectionMatrix();
+                if (cameraHomeCaptured) view.transform.position = cameraHome;
+            }
         }
         private void OnDestroy()
         {
@@ -101,7 +118,9 @@ namespace CandyCruisers
         public void Refresh()
         {
             if (view == null) view = GetComponent<Camera>();
+            CaptureCameraHome();
             view.orthographicSize = Mathf.Max(6f, 3.2f / Mathf.Max(0.01f, view.aspect));
+            ApplyIphoneNotchOffset();
             // Compress every world-space visual together without moving actors or changing gameplay dimensions.
             view.ResetProjectionMatrix();
             if (waveCrunch > 0)
@@ -126,6 +145,18 @@ namespace CandyCruisers
             float scale = Mathf.Max(2f * view.orthographicSize * view.aspect / size.x,
                 2f * view.orthographicSize / size.y) * BackgroundScaleMultiplier();
             ApplyBackgroundPose(scale);
+        }
+
+        public float PlayfieldViewportLiftForIphoneNotch()
+        {
+            if (view == null) view = GetComponent<Camera>();
+            CaptureCameraHome();
+            if (!ShouldApplyIphoneNotchOffset()) return 0;
+            float currentTop = .5f + (PlayfieldBoundaryTopY - cameraHome.y) / (2f * view.orthographicSize);
+            float topInset = Mathf.Max(TopUnsafeInsetRatio(), IphoneNotchDefaultTopInsetRatio);
+            float targetTop = Mathf.Min(1f - topInset + IphoneNotchTargetOverlapRatio,
+                IphoneNotchMaxPlayfieldTopViewportY);
+            return Mathf.Max(0, targetTop - currentTop);
         }
 
         public void TickBackground(float seconds)
@@ -243,6 +274,52 @@ namespace CandyCruisers
             backgroundHome = starBackground.transform.localPosition;
             backgroundHomeRotation = starBackground.transform.localRotation;
             backgroundHomeCaptured = true;
+        }
+
+        private void CaptureCameraHome()
+        {
+            if (cameraHomeCaptured) return;
+            cameraHome = view.transform.position;
+            cameraHomeCaptured = true;
+        }
+
+        private void ApplyIphoneNotchOffset()
+        {
+            if (!cameraHomeCaptured) return;
+            var position = cameraHome;
+            position.y -= PlayfieldViewportLiftForIphoneNotch() * view.orthographicSize * 2f;
+            view.transform.position = position;
+        }
+
+        private bool ShouldApplyIphoneNotchOffset()
+        {
+            if (!IphoneFramingActive() || view == null || view.aspect > IphoneNotchPortraitAspectLimit)
+                return false;
+            float topInset = TopUnsafeInsetRatio();
+            return topInset >= IphoneNotchMinimumTopInsetRatio || view.aspect <= IphoneNotchFallbackAspectLimit;
+        }
+
+        private static bool IphoneFramingActive()
+        {
+#if UNITY_EDITOR
+            if (ForceIphoneNotchOffsetForTests) return true;
+#endif
+#if UNITY_IOS
+            return Application.platform == RuntimePlatform.IPhonePlayer;
+#else
+            return false;
+#endif
+        }
+
+        private static float TopUnsafeInsetRatio()
+        {
+#if UNITY_EDITOR
+            if (ForceIphoneNotchOffsetForTests)
+                return Mathf.Clamp01(SimulatedIphoneTopInsetRatioForTests);
+#endif
+            float height = Screen.height;
+            if (height <= 0) return 0;
+            return Mathf.Clamp01((height - Screen.safeArea.yMax) / height);
         }
 
         private float BackgroundScaleMultiplier()

@@ -6,6 +6,47 @@ order, not a claim that every original feature is complete or balanced.
 
 ## Rebuild Progress
 
+- [x] Add a gameplay edit of Contact trimmed at the analyzed transition beats near 0:55 and 4:48 (55.380-288.206 seconds), with beat-map, downbeat, key and loudness metadata.
+
+- [x] Match the title-screen slime body to the subtitle's current palette color while keeping it saturated through the white pulse and switching directly to the next color each beat. Verified with menu color tests.
+
+- [x] Add a small rounded lizard-like bulb beyond the player's tongue endpoint. It follows ordinary, return, magic and shock presentation without changing collision geometry. Verified with focused presentation tests.
+
+- [x] Improve subtitle legibility against its emitted light with a thin white outline and softer local glow, preserving solid letter colors and existing backlight behavior. Verified with menu tests and a rendered portrait preview.
+
+- [x] Title backlighting passes through enclosed letter openings even above solid lower strokes. Outer light boundaries rise 15 degrees from the subtitle's bottom ink corners. Verified with rendered pixel tests and portrait/landscape menu previews.
+
+- [x] The solid-colored, glowing subtitle emits one continuous field of beat-pulsing light. The opaque white main title and unchanged slime artwork block it, casting actual glyph and sprite shadows; light escapes through gaps instead of passing through the artwork. Verified with shadow-render pixel tests, menu regression checks and portrait/landscape previews.
+
+- [x] Keep soot and falling cinders below the eyes and pupils throughout recovery, including blinks; restore original face draw order afterward and exclude soot from extra-life copies.
+
+- [x] Verify the special Blue electrical shock's one-beat travel duration, silent fallback and unchanged archived tongue-return speeds.
+
+- [x] Special Blue shield shocks leave a gray trail along the tongue, flash on player impact, and leave a black body with tiny pupils and smoke. On tongue return, the player blinks and soot falls off as cinders revealing the next color; stun and return mechanics are unchanged.
+
+- [x] Full-set bars reuse the partial-set color/light drain during each bar's falling phase, preserving sequential spikes, removal timing, sounds and rewards.
+
+- [x] Remove wave-spawn inward border compression and rim thickening; keep camera framing, border geometry and existing color flashes unchanged.
+
+- [x] Replacement jumps ease inward toward the playfield center during ascent, by up to 80% of a body width, while preserving their landing destination.
+
+- [x] Replacement lives visibly crouch to half height in their slot for a 0.2-second anticipation phase before springing into their jump; flips wait until takeoff.
+
+- [x] Player landings use a shared grounded squash and rebound after replacement jumps, reward-bar flips and title-screen arrival, without changing movement or collision bounds.
+
+- [x] Replacement lives jump in a continuous sideways arc from their life slot, with subtle takeoff squash, airborne stretch and landing compression; apex control and collision bounds remain unchanged.
+
+- [x] Reward-bar flips trigger at 10% body overlap; side-lift determines rotation up to 50%, and movement determines rotation above 50%.
+
+- [x] Spare slimes copy the player's actual sprite pieces and proportions while keeping independent synchronized movement.
+- [x] Replacement slimes sometimes flip on takeoff; control resumes at the apex with untimed airborne invincibility, and flashing protection starts only on landing.
+- [x] Earned slimes emerge clipped behind the nearby border, step onto the final bar, flip upward and arc above their life slot before landing.
+
+- [x] Extra lives use independent synchronized slime artwork: normal pulses and occasional left-right routines change only on four-beat measure boundaries; full-life full-set rewards trigger one group flip.
+- [x] Earned-life slimes enter from offscreen and trampoline from the final reward-bar spike into the life row; consumed spares jump down from the life row on death instead of slashing or splitting.
+
+- [x] Full reward-bar celebration spikes left to right like a wave; a spike beneath the player launches a small visual-only trampoline flip. Partial-set power-down and refill timing remain unchanged.
+
 This copy is the active rebuild checklist. Check items off as they are implemented
 and verified. The original-game inventory below describes the old game, not the
 completion status of the rebuild.
@@ -790,6 +831,7 @@ reference for individual rules and original limitations.
 - [x] Render multicolored spacedust as soft round shimmering glints, retaining visible brightness and size until absorption at the player.
 - [x] Randomize spacedust sizes independently of gameplay randomness; use the same shimmering glints for player death fragments and the game-over colored burst.
 - [x] Start the missed-shot combo-break animation when the tongue begins retracting, without replaying it on arrival.
+- [x] Combo-break text retains its last enemy color through the slash, then drains to white as its halves separate.
 - [x] Use cumulative level thresholds of 10 * level * (level + 1), beginning with 20 defeated enemies for level two.
 - [x] Pulse the solid progress fill in size on the music beat while a level-up is banked until the fleet clears; keep the overfill strip aligned.
 - [x] Keep score/level text above life artwork and reserve compact-layout clearance for pulsing lives and progress fill.
@@ -820,3 +862,7 @@ reference for individual rules and original limitations.
 - [x] Randomize full-set bar removal with double-time white/color flashes; make the final bar the next player's color and guarantee it in the next fleet.
 - [x] Use Disco Descent for gameplay and the previous track for the menu; pulse the gameplay border from the song's beat clock, using white/black when colorless.
 - [x] Correct normal border to earned colors followed by one white step, or solid white with no bars; use a beat-count clear transition with continuous white/color pairs ending on the next player's color, not white.
+# Main Menu Slime Presentation
+- [x] Minimal main menu with a larger beat-pulsing BASS INVADERS title, THE RHYTHM IS OUT THERE subtitle, and saturated beat-colored perched character matching its gameplay size.
+- [x] Tap/click anywhere or press Enter to fade the title and float the character into position before gameplay.
+- [x] Flat-bottom slime placeholder with a planted base, upper-body jelly deformation and following eyes; movement and beat pulses preserve the grounded base and collision bounds.

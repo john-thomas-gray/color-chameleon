@@ -11,6 +11,12 @@ namespace CandyCruisers
         public const float GameOverBlackoutBeats = 4;
         public float GameOverBlackoutSeconds { get; private set; } = GameOverBlackoutBeats * FullSetCelebration.StepDuration;
         public const float GameOverTitleFadeSeconds = .65f;
+        public const float EpilepsyWarningSeconds = 4f;
+        public const string EpilepsyWarningTitle = "PHOTOSENSITIVITY WARNING";
+        public const string EpilepsyWarningMessage =
+            "This game contains flashing lights and other visual effects that may trigger seizures in people with photosensitive epilepsy.\n\n" +
+            "If you or anyone in your family has an epileptic condition, consult a doctor before playing. Player discretion is advised.";
+        private float epilepsyWarningElapsed;
         private float gameOverElapsed;
         public float GameOverMusicGain => 1 - GameOverBlackoutOpacity;
         public float GameOverBlackoutOpacity => State == RunState.GameOver ? 1 : State == RunState.Dying ?
@@ -26,19 +32,24 @@ namespace CandyCruisers
         private bool deathAnimationStarted;
         private GameOverBlackout blackout;
         private static bool startAfterReload;
+        private static bool epilepsyWarningShown;
         private static int rememberedStartLevel = RunProgress.MinLevel;
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void ResetStartup()
         {
             startAfterReload = false;
+            epilepsyWarningShown = false;
             rememberedStartLevel = RunProgress.MinLevel;
         }
         private float previousTimeScale = 1;
         private int inputBlockedThrough = -1;
         private bool started;
         public bool IsPaused { get; private set; }
-        public bool BlocksGameplayInput => IsPaused || State == RunState.MainMenu || State == RunState.Dying ||
-            State == RunState.GameOver || Time.frameCount <= inputBlockedThrough;
+        public bool PresentationPreview { get; set; }
+        public bool OpeningWarningActive => Application.isPlaying && !PresentationPreview && !epilepsyWarningShown &&
+            epilepsyWarningElapsed < EpilepsyWarningSeconds;
+        public bool BlocksGameplayInput => PresentationPreview || IsPaused || State == RunState.MainMenu || State == RunState.Dying ||
+            State == RunState.GameOver || OpeningWarningActive || Time.frameCount <= inputBlockedThrough;
         [SerializeField] private PlayerMovement player;
         private EnemyGrid grid;
         private EnemyRowSpawner spawner;
@@ -54,6 +65,63 @@ namespace CandyCruisers
         private bool restarting;
         private bool leaderboardRecorded;
         private string menuLevelDigits = "";
+        public const float MenuArrivalSeconds = 1.2f;
+        public const float MenuTakeoffSeconds = .32f;
+        public bool MenuArriving { get; private set; }
+        public float MenuArrivalProgress => Mathf.Clamp01(menuArrivalElapsed / MenuArrivalSeconds);
+        public float MenuArrivalFadeProgress => MenuArrivalFadeProgressFor(menuArrivalElapsed);
+        public float MenuArrivalJumpProgress => MenuArrivalJumpProgressFor(menuArrivalElapsed);
+        public float MenuTitleIntroElapsed => menuTitleElapsed;
+        public const string MenuIntroSeenKey = "CandyCruisers.MenuIntro.Seen";
+        public const string HighestReachedLevelKey = "CandyCruisers.HighestReachedLevel";
+        public bool FirstLaunchIntro { get; private set; }
+        public MenuIntroAnimation.Entrance MenuEntrance { get; private set; }
+        private bool menuIntroRecorded;
+        private float menuArrivalElapsed;
+        private float menuTitleElapsed;
+        private float menuEyeDelayElapsed;
+        private float menuEyeDelaySeconds;
+        private bool menuEyeDelayStarted;
+        private Rect menuDeparture;
+        public bool MenuEyeTrackingReady => !MenuArriving && menuTitleElapsed >= MenuWordIntroDuration &&
+            menuEyeDelayStarted && menuEyeDelayElapsed >= menuEyeDelaySeconds;
+
+        public void SetMenuEntrancePreview(MenuIntroAnimation.Entrance entrance)
+        {
+            if (!PresentationPreview || entrance < MenuIntroAnimation.Entrance.FlipRight ||
+                entrance > MenuIntroAnimation.Entrance.TractorBeam) return;
+            MenuEntrance = entrance;
+            menuTitleElapsed = menuArrivalElapsed = 0;
+            menuEyeDelayElapsed = menuEyeDelaySeconds = 0;
+            menuEyeDelayStarted = false;
+            MenuArriving = false;
+            menuDeparture = default;
+        }
+
+        public void BeginMenuArrival()
+        {
+            if (State != RunState.MainMenu || MenuArriving) return;
+            if (FirstLaunchIntro && menuTitleElapsed < MenuWordIntroDuration) return;
+            menuTitleElapsed = MenuWordIntroDuration;
+            MenuArriving = true;
+            menuArrivalElapsed = 0;
+            // Screen dimensions outside a drawing event can describe a different editor view.
+            // Capture the departure on the first draw in the actual menu canvas instead.
+            menuDeparture = default;
+            player?.CancelPointer();
+        }
+
+        private void ActivateMainMenu()
+        {
+            if (!MenuArriving && menuTitleElapsed < MenuWordIntroDuration)
+            {
+                if (FirstLaunchIntro) return;
+                menuTitleElapsed = MenuWordIntroDuration;
+                player?.CancelPointer();
+                return;
+            }
+            BeginMenuArrival();
+        }
         [SerializeField, Range(RunProgress.MinLevel, RunProgress.MaxMenuStartLevel)] private int startLevel = RunProgress.MinLevel;
         private static readonly EnemyColor[] PreviewRegularColors = {
             EnemyColor.Red, EnemyColor.Blue, EnemyColor.Green, EnemyColor.Purple, EnemyColor.Yellow, EnemyColor.Orange
@@ -65,7 +133,7 @@ namespace CandyCruisers
         public RunProgress Progress { get; } = new RunProgress();
         public event System.Action WaveSpawned;
         public int LastLeaderboardRank { get; private set; }
-        public Color ProgressBarColor => player != null ? player.DisplayColor : Color.gray;
+        public Color ProgressBarColor => player != null ? player.AccentColor : Color.gray;
         public const float ComboMilestoneAnimationSeconds = 1.1f;
         public const float ComboMilestonePulseSeconds = .45f;
         public const float ComboDeathFadeSeconds = .5f;
@@ -95,21 +163,85 @@ namespace CandyCruisers
                 rememberedStartLevel = startLevel;
             }
         }
+        public static int HighestReachedLevel
+        {
+            get
+            {
+                int highest = PlayerPrefs.GetInt(HighestReachedLevelKey, RunProgress.MinLevel);
+                foreach (var entry in LocalLeaderboard.Entries())
+                    highest = Mathf.Max(highest, entry.Level);
+                return RunProgress.ClampMenuStartLevel(highest);
+            }
+        }
+        public int SelectableMaxStartLevel => SelectableMaxStartLevelFor(HighestReachedLevel);
+        public bool MainMenuLevelSelectVisible => MainMenuLevelSelectVisibleFor(HighestReachedLevel,
+            menuTitleElapsed, MenuArriving);
+
+        public static void RecordReachedLevel(int level)
+        {
+            int reached = RunProgress.ClampMenuStartLevel(level);
+            if (reached <= HighestReachedLevel) return;
+            PlayerPrefs.SetInt(HighestReachedLevelKey, reached);
+            PlayerPrefs.Save();
+        }
+
+        public static int SelectableMaxStartLevelFor(int highestReachedLevel) =>
+            RunProgress.ClampMenuStartLevel(Mathf.Max(RunProgress.MinLevel, highestReachedLevel));
+
+        public static bool MainMenuLevelSelectVisibleFor(int highestReachedLevel, float introElapsed, bool arriving) =>
+            !arriving && introElapsed >= MenuWordIntroDuration && SelectableMaxStartLevelFor(highestReachedLevel) >= 2;
+
+        private int ClampSelectableStartLevel(int level) =>
+            Mathf.Clamp(RunProgress.ClampMenuStartLevel(level), RunProgress.MinLevel, SelectableMaxStartLevel);
+
+        private void SetSelectableStartLevel(int level)
+        {
+            StartLevel = ClampSelectableStartLevel(level);
+        }
         private float feedbackRemaining;
         private string feedback = "";
         private readonly ColorClearBarAnimation clearBarAnimation = new ColorClearBarAnimation();
+        private readonly ColorClearBarLayout clearBarLayout = new ColorClearBarLayout();
+        public List<EnemyColor> DisplayedColorClearBarColors => clearBarLayout.Active ?
+            new List<EnemyColor>(clearBarLayout.Colors) : ColorClearBarColors(spawner, grid);
+        public Rect DisplayedColorClearBarSlotRect(Rect row, int index)
+        {
+            var colors = DisplayedColorClearBarColors;
+            return clearBarLayout.Active ? clearBarLayout.Present(colors[index], row) :
+                ColorClearBarSlotRect(row.x, row.y, row.width, colors.Count, index);
+        }
         public FullSetCelebration ClearCelebration { get; } = new FullSetCelebration();
         private bool partialClearCelebration;
         private int rewardedLifeSlot = -1;
         private int refillPostBarBeats = 1;
-        private float? refillRewardBeat;
         private int removedBarCount;
+        private void OnCelebrationBarSpiked(EnemyColor color, float duration)
+        {
+            if (!partialClearCelebration && player != null && ClearCelebration.LastColor == color &&
+                rewardedLifeSlot < 0 && player.ExtraLives == PlayerMovement.MaxExtraLives)
+                player.LifeIcons.Choreography.BeginFlip(musicPlayer != null ? musicPlayer.SecondsForBeats(1) : FullSetCelebration.StepDuration);
+            if (partialClearCelebration || player == null || !player.Alive || Camera.main == null) return;
+            var colors = DisplayedColorClearBarColors;
+            var camera = Camera.main;
+            float left = camera.WorldToScreenPoint(new Vector3(-3, 0, 0)).x + 10 * GuiScale;
+            float right = camera.WorldToScreenPoint(new Vector3(3, 0, 0)).x - 10 * GuiScale;
+            int index = colors.IndexOf(color);
+            if (index < 0 || colors.Count == 0) return;
+            var bar = ColorClearBarSlotRect(left / GuiScale, 0, (right - left) / GuiScale, colors.Count, index);
+            var body = CharacterVisuals.Ensure(player.gameObject).HitBounds;
+            if (!PlayerCelebrationFlip.TryDirection(camera.WorldToScreenPoint(body.min).x,
+                camera.WorldToScreenPoint(body.max).x, bar.xMin * GuiScale, bar.xMax * GuiScale,
+                player.HorizontalDirection, out bool clockwise)) return;
+            var flip = player.GetComponent<PlayerCelebrationFlip>();
+            if (flip == null) flip = player.gameObject.AddComponent<PlayerCelebrationFlip>();
+            flip.Begin(Mathf.Clamp(duration, .35f, .7f), clockwise);
+        }
         private void OnCelebrationColorRemoved(EnemyColor color)
         {
             if (!grid.HasColorClearBar(color)) return;
+            if (partialClearCelebration) return;
             int index = removedBarCount++;
-            soundEffects?.PlayCue(partialClearCelebration ? SoundEffect.BarPowerDown : SoundEffect.BarPowerUp,
-                partialClearCelebration ? Mathf.Pow(2, -index * 2f / 12) : ColorClearBarAnimation.TonePitch(index + 1));
+            soundEffects?.PlayCue(SoundEffect.BarPowerUp, ColorClearBarAnimation.TonePitch(index + 1));
         }
         private void OnColorCleared(EnemyColor color)
         {
@@ -131,6 +263,7 @@ namespace CandyCruisers
         private void AwardClear(int count, bool fleetCleared, int scoreWeight, bool applyCombo)
         {
             int before = Progress.Level;
+            var previousBarColors = fleetCleared ? DisplayedColorClearBarColors : null;
             int combo = applyCombo ? Progress.ScoringComboMultiplier : 1;
             long basePoints = (100L + 10L * (before - 1)) * scoreWeight;
             long fleetBonus = fleetCleared ? 10000L * before : 0;
@@ -144,6 +277,8 @@ namespace CandyCruisers
             feedback = ScoreCalculation(basePoints, combo, fleetBonus, previousPoints);
             if (Progress.Level > before)
             {
+                if (!PresentationPreview) RecordReachedLevel(Progress.Level);
+                clearBarLayout.Begin(previousBarColors, ColorClearBarColors(spawner, grid), CurrentBeatDuration);
                 soundEffects?.PlayCue(SoundEffect.LevelUp);
                 feedback += "  /  Level " + Progress.Level;
                 foreach (EnemyColor color in System.Enum.GetValues(typeof(EnemyColor)))
@@ -175,8 +310,15 @@ namespace CandyCruisers
             {
                 bool start = startAfterReload;
                 startAfterReload = false;
-                StartLevel = rememberedStartLevel;
+                if (PresentationPreview) StartLevel = rememberedStartLevel;
+                else SetSelectableStartLevel(rememberedStartLevel);
                 State = RunState.MainMenu;
+                menuTitleElapsed = 0;
+                menuEyeDelayElapsed = menuEyeDelaySeconds = 0;
+                menuEyeDelayStarted = false;
+                FirstLaunchIntro = !PresentationPreview && PlayerPrefs.GetInt(MenuIntroSeenKey, 0) == 0;
+                MenuEntrance = FirstLaunchIntro ? MenuIntroAnimation.Entrance.TractorBeam :
+                    (MenuIntroAnimation.Entrance)Random.Range(0, 3);
                 Suspend(true);
                 musicPlayer?.UpdatePlayback();
                 if (start) StartRun();
@@ -186,12 +328,15 @@ namespace CandyCruisers
         public void StartRun()
         {
             if (State != RunState.MainMenu) return;
+            MenuArriving = false;
             inputBlockedThrough = Time.frameCount + 1;
             leaderboardRecorded = false;
             gameOverElapsed = 0;
             LastLeaderboardRank = 0;
             menuLevelDigits = "";
+            if (!PresentationPreview) SetSelectableStartLevel(StartLevel);
             Progress.Reset(StartLevel);
+            clearBarLayout.Reset();
             accumulatingShotScore = false;
             feedbackRemaining = 0;
             rewardedLifeSlot = -1;
@@ -223,8 +368,8 @@ namespace CandyCruisers
             Suspend(State != RunState.Playing);
             musicPlayer?.UpdatePlayback();
         }
-        private void OnApplicationFocus(bool focused) { if (started && !focused) Pause(); }
-        private void OnApplicationPause(bool paused) { if (started && paused) Pause(); }
+        private void OnApplicationFocus(bool focused) { if (!PresentationPreview && started && !focused) Pause(); }
+        private void OnApplicationPause(bool paused) { if (!PresentationPreview && started && paused) Pause(); }
         private Rect PauseButton
         {
             get
@@ -250,6 +395,7 @@ namespace CandyCruisers
             movement = GetComponent<EnemyGridMovement>();
             grid.FleetCleared += BeginRefill;
             ClearCelebration.ColorRemoved += OnCelebrationColorRemoved;
+            ClearCelebration.BarSpiked += OnCelebrationBarSpiked;
             grid.MatchCleared += OnMatchCleared;
             grid.MatchColorScored += OnMatchColorScored;
             grid.OrangeBurstCleared += OnOrangeBurstCleared;
@@ -260,7 +406,9 @@ namespace CandyCruisers
         private void OnDisable()
         {
             ClearCelebration.Reset();
+            clearBarLayout.Reset();
             ClearCelebration.ColorRemoved -= OnCelebrationColorRemoved;
+            ClearCelebration.BarSpiked -= OnCelebrationBarSpiked;
             if (player != null) player.SetCelebrationColor(null);
             if (IsPaused) { Time.timeScale = previousTimeScale; IsPaused = false; }
             if (soundEffects != null) soundEffects.SetPaused(false);
@@ -336,10 +484,12 @@ namespace CandyCruisers
 
         private void Update()
         {
+            if (PresentationPreview) { Tick(Time.deltaTime); return; }
+            if (OpeningWarningActive) { Tick(Time.unscaledDeltaTime); return; }
             if (IsPaused || State == RunState.MainMenu || State == RunState.GameOver)
                 foreach (var touch in Input.touches)
                     if (touch.phase == TouchPhase.Ended && ActivateMenuTouch(touch.position)) return;
-            if (State == RunState.GameOver && Input.touchCount == 0 && Input.GetMouseButtonUp(0) &&
+            if ((State == RunState.GameOver || State == RunState.MainMenu) && Input.touchCount == 0 && Input.GetMouseButtonUp(0) &&
                 ActivateMenuTouch(Input.mousePosition)) return;
             foreach (var key in MenuKeys)
                 if (Input.GetKeyDown(key) && HandleMenuKey(key)) return;
@@ -347,7 +497,7 @@ namespace CandyCruisers
         }
 
         private static readonly KeyCode[] MenuKeys = { KeyCode.P, KeyCode.Escape, KeyCode.Return,
-            KeyCode.KeypadEnter, KeyCode.R, KeyCode.M, KeyCode.LeftArrow, KeyCode.RightArrow,
+            KeyCode.KeypadEnter, KeyCode.Space, KeyCode.R, KeyCode.M, KeyCode.LeftArrow, KeyCode.RightArrow,
             KeyCode.I, KeyCode.Alpha0, KeyCode.Alpha1, KeyCode.Alpha2, KeyCode.Alpha3, KeyCode.Alpha4,
             KeyCode.Alpha5, KeyCode.Alpha6, KeyCode.Alpha7, KeyCode.Alpha8, KeyCode.Alpha9,
             KeyCode.Keypad0, KeyCode.Keypad1, KeyCode.Keypad2, KeyCode.Keypad3, KeyCode.Keypad4,
@@ -369,9 +519,16 @@ namespace CandyCruisers
                 else return false;
                 return true;
             }
+            if (key == KeyCode.Space)
+            {
+                if (State == RunState.MainMenu) ActivateMainMenu();
+                else if (State == RunState.GameOver) ReturnToMenu();
+                else return false;
+                return true;
+            }
             if (key == KeyCode.Return || key == KeyCode.KeypadEnter)
             {
-                if (State == RunState.MainMenu) StartRun();
+                if (State == RunState.MainMenu) ActivateMainMenu();
                 else if (IsPaused) Resume();
                 else if (State == RunState.GameOver) Restart();
                 else return false;
@@ -379,19 +536,24 @@ namespace CandyCruisers
             }
             if (key == KeyCode.R && State != RunState.MainMenu) { Restart(); return true; }
             if (key == KeyCode.M && (IsPaused || State == RunState.GameOver)) { ReturnToMenu(); return true; }
-            if (State == RunState.MainMenu && (key == KeyCode.LeftArrow || key == KeyCode.RightArrow))
-            { menuLevelDigits = ""; StartLevel += key == KeyCode.LeftArrow ? -1 : 1; return true; }
+            if (State == RunState.MainMenu && MainMenuLevelSelectVisible &&
+                (key == KeyCode.LeftArrow || key == KeyCode.RightArrow))
+            {
+                menuLevelDigits = "";
+                SetSelectableStartLevel(StartLevel + (key == KeyCode.LeftArrow ? -1 : 1));
+                return true;
+            }
             return false;
         }
 
         private bool HandleMenuLevelDigit(KeyCode key)
         {
-            if (State != RunState.MainMenu) return false;
+            if (State != RunState.MainMenu || !MainMenuLevelSelectVisible) return false;
             int digit = MenuDigit(key);
             if (digit < 0) return false;
             if (menuLevelDigits.Length >= 2) menuLevelDigits = "";
             menuLevelDigits += digit.ToString();
-            StartLevel = int.Parse(menuLevelDigits);
+            SetSelectableStartLevel(int.Parse(menuLevelDigits));
             return true;
         }
 
@@ -405,6 +567,12 @@ namespace CandyCruisers
         private bool ActivateMenuTouch(Vector2 point)
         {
             point = FlipGuiY(ToGuiPoint(point));
+            if (State == RunState.MainMenu)
+            {
+                if (TryActivateMainMenuLevelSelect(point)) return true;
+                ActivateMainMenu();
+                return true;
+            }
             if (State == RunState.GameOver)
             {
                 if (!GameOverTitleReady) return false;
@@ -427,11 +595,71 @@ namespace CandyCruisers
             return false;
         }
 
+        private bool TryActivateMainMenuLevelSelect(Vector2 point)
+        {
+            if (!MainMenuLevelSelectVisible) return false;
+            var row = MainMenuLevelSelectRect(GuiWidth, GuiHeight);
+            if (MainMenuLevelSelectLeftButtonRect(row).Contains(point))
+            {
+                menuLevelDigits = "";
+                SetSelectableStartLevel(StartLevel - 1);
+                return true;
+            }
+            if (MainMenuLevelSelectRightButtonRect(row).Contains(point))
+            {
+                menuLevelDigits = "";
+                SetSelectableStartLevel(StartLevel + 1);
+                return true;
+            }
+            return MainMenuLevelSelectValueRect(row).Contains(point);
+        }
+
         private static void TogglePlayerInvincible() => DeveloperOptions.PlayerInvincible = !DeveloperOptions.PlayerInvincible;
 
         public void Tick(float seconds)
         {
-            if (IsPaused || State == RunState.MainMenu) return;
+            if (IsPaused) return;
+            if (OpeningWarningActive)
+            {
+                epilepsyWarningElapsed = Mathf.Min(EpilepsyWarningSeconds,
+                    epilepsyWarningElapsed + Mathf.Max(0, seconds));
+                if (epilepsyWarningElapsed >= EpilepsyWarningSeconds)
+                {
+                    epilepsyWarningShown = true;
+                    musicPlayer?.UpdatePlayback();
+                }
+                return;
+            }
+            if (State == RunState.MainMenu)
+            {
+                float elapsed = Mathf.Max(0, seconds);
+                if (MenuArriving)
+                {
+                    menuArrivalElapsed += elapsed;
+                    if (MenuArrivalProgress >= 1)
+                    {
+                        float overshoot = menuArrivalElapsed - MenuArrivalSeconds;
+                        StartRun();
+                        if (player != null) CharacterVisuals.Ensure(player.gameObject).BeginLanding(overshoot);
+                    }
+                }
+                else
+                {
+                    float previousTitleElapsed = menuTitleElapsed;
+                    menuTitleElapsed = Mathf.Min(MenuWordIntroDuration, menuTitleElapsed + elapsed);
+                    float afterIntro = Mathf.Max(0, elapsed -
+                        Mathf.Max(0, MenuWordIntroDuration - previousTitleElapsed));
+                    if (menuTitleElapsed >= MenuWordIntroDuration)
+                        TickMenuEyeTrackingDelay(afterIntro);
+                    if (FirstLaunchIntro && !menuIntroRecorded && !PresentationPreview && menuTitleElapsed >= MenuWordIntroDuration)
+                    {
+                        PlayerPrefs.SetInt(MenuIntroSeenKey, 1);
+                        PlayerPrefs.Save();
+                        menuIntroRecorded = true;
+                    }
+                }
+                return;
+            }
             if (State == RunState.GameOver)
             {
                 gameOverElapsed += Mathf.Max(0, seconds);
@@ -441,6 +669,7 @@ namespace CandyCruisers
             ObserveComboStreak();
             TickComboPresentation(seconds);
             clearBarAnimation.Tick(seconds);
+            clearBarLayout.Tick(seconds, !ClearCelebration.Active || ClearCelebration.Finished);
             if (State == RunState.Dying)
             {
                 float previousAnimationAge = Mathf.Max(0, deathElapsed - GameOverBlackoutSeconds);
@@ -466,13 +695,13 @@ namespace CandyCruisers
                 }
                 float animationAge = Mathf.Max(0, deathElapsed - GameOverBlackoutSeconds);
                 blackout?.Present(GameOverBlackoutOpacity, animationAge);
-                if (!deathShattered && animationAge >= PlayerDeathBurst.ShatterSeconds)
+                if (!deathShattered && animationAge >= PlayerDeathBurst.ShatterSoundSeconds)
                 {
                     deathShattered = true;
                     soundEffects?.PlayCue(SoundEffect.PlayerShatter);
                 }
                 if (deathCue != null) deathCue.Tick(animationAge - previousAnimationAge);
-                if (hasDeathCue ? deathCue == null || deathCue.Finished : animationAge >= PlayerDeathBurst.Duration) EndGame();
+                if (hasDeathCue ? deathCue == null || deathCue.Finished : animationAge >= PlayerFatalDustBurst.Duration) EndGame();
                 return;
             }
             if (CheckPlayerContact()) return;
@@ -480,7 +709,7 @@ namespace CandyCruisers
             if (State != RunState.Refilling) return;
             float celebrationSeconds = Mathf.Max(0, seconds);
             bool musicTimed = refillMusicClip != null && musicPlayer != null &&
-                musicPlayer.Source.clip == refillMusicClip && musicPlayer.Source.isPlaying &&
+                musicPlayer.Source.clip == refillMusicClip && musicPlayer.BeatClockRunning &&
                 musicPlayer.PlaybackSeconds >= refillMusicSeconds;
             if (musicTimed)
             {
@@ -502,16 +731,11 @@ namespace CandyCruisers
                 if (!ClearCelebration.Finished) return;
                 if (!wasFinished)
                 {
-                    // An earned life uses the intervening beat before the planned downbeat.
-                    if (rewardedLifeSlot >= 0)
-                    {
-                        player.LifeIcons.ReleaseGain(rewardedLifeSlot, musicPlayer, musicTimed ? refillRewardBeat : null);
-                        rewardedLifeSlot = -1;
-                    }
-                    if (!musicTimed) refillRemaining = musicPlayer != null && musicPlayer.Source.isPlaying ?
+                    rewardedLifeSlot = -1;
+                    if (!musicTimed) refillRemaining = musicPlayer != null && musicPlayer.BeatClockRunning ?
                         musicPlayer.SecondsAtBeat(Mathf.Floor(musicPlayer.BeatPosition) + refillPostBarBeats) -
                             musicPlayer.PlaybackSeconds : refillPostBarBeats * CurrentBeatDuration;
-                    return;
+                    if (refillPostBarBeats > 0) return;
                 }
             }
             if (musicTimed)
@@ -539,6 +763,7 @@ namespace CandyCruisers
             refillMusicClip = null;
             player.SetCelebrationColor(null);
             player.RefreshColor();
+            player.LifeIcons.ClearRewardColor();
             WaveSpawned?.Invoke();
         }
 
@@ -549,10 +774,10 @@ namespace CandyCruisers
             {
                 partialClearCelebration = !grid.AllColorClearBarsFilled;
                 refillPostBarBeats = rewardedLifeSlot >= 0 ? 2 : 1;
-                refillRewardBeat = null;
                 removedBarCount = 0;
                 var colors = grid.SeenColors();
                 var earned = colors.FindAll(grid.HasColorClearBar);
+                if (partialClearCelebration) refillPostBarBeats = 0;
                 float barBeatCount = MinimumColorClearBarSequenceBeats(earned.Count);
                 float barStepBeats = ColorClearBarStepBeats(barBeatCount, earned.Count);
                 float holdDuration = 0;
@@ -563,7 +788,7 @@ namespace CandyCruisers
                     float now = musicPlayer.PlaybackSeconds;
                     float beat = musicPlayer.BeatPositionAtTime(now);
                     float removalStartBeat = beat;
-                    if (musicPlayer.Source.isPlaying)
+                    if (musicPlayer.BeatClockRunning)
                     {
                         float spawnBeat = RefillDownbeat(beat, barBeatCount, !partialClearCelebration,
                             musicPlayer.CurrentDownbeatOffsetBeats, rewardedLifeSlot >= 0);
@@ -571,7 +796,6 @@ namespace CandyCruisers
                         barBeatCount = ColorClearBarSequenceBeats(beat, spawnBeat, refillPostBarBeats);
                         barStepBeats = ColorClearBarStepBeats(barBeatCount, earned.Count);
                         removalStartBeat = spawnBeat - barBeatCount - refillPostBarBeats;
-                        refillRewardBeat = spawnBeat - 1;
                         refillMusicClip = musicPlayer.Source.clip;
                         refillMusicSeconds = now;
                         refillSpawnSeconds = musicPlayer.SecondsAtBeat(spawnBeat);
@@ -594,11 +818,18 @@ namespace CandyCruisers
                 }
                 if (earned.Count > 0)
                 {
-                    ClearCelebration.Begin(earned, plan, refillDuration, removalBeatDurations, holdDuration);
+                    ClearCelebration.Begin(earned, plan, refillDuration, removalBeatDurations, holdDuration, partialClearCelebration);
                     refillDuration = ClearCelebration.PlaybackDuration;
+                    if (partialClearCelebration) soundEffects?.PlayCueForDuration(SoundEffect.BarPowerDown, refillDuration);
                 }
                 else ClearCelebration.Reset();
-                if (rewardedLifeSlot >= 0) player.LifeIcons.ReserveGain(rewardedLifeSlot);
+                if (rewardedLifeSlot >= 0)
+                {
+                    var slots = DisplayedColorClearBarColors;
+                    int barIndex = ClearCelebration.LastColor.HasValue ? slots.IndexOf(ClearCelebration.LastColor.Value) : 0;
+                    player.LifeIcons.ScheduleWaveGain(rewardedLifeSlot, musicPlayer,
+                        ClearCelebration.FinalSpikeTime, barIndex, slots.Count, earned.Count > 1, ClearCelebration.LastColor);
+                }
                 // A developer override can exclude every earned color. Reserve the final reward color anyway.
                 if (plan != null && plan.Length > 0 && ClearCelebration.LastColor.HasValue &&
                     System.Array.IndexOf(plan, ClearCelebration.LastColor.Value) < 0)
@@ -624,7 +855,8 @@ namespace CandyCruisers
             int offset = GameplayMusicPlayer.DownbeatOffsetBeats, bool lifeAwarded = false)
         {
             // Pick the downbeat first; the bar choreography stretches into the available space.
-            float earliestSpawn = clearBeat + Mathf.Max(0, minimumBarBeats) + 1 + (lifeAwarded ? 1 : 0);
+            float postBarBeats = lifeAwarded ? 2 : allBarsFull ? 1 : 0;
+            float earliestSpawn = clearBeat + Mathf.Max(0, minimumBarBeats) + postBarBeats;
             return Mathf.Ceil((earliestSpawn - offset) / GameplayMusicPlayer.BeatsPerMeasure) *
                 GameplayMusicPlayer.BeatsPerMeasure + offset;
         }
@@ -688,7 +920,7 @@ namespace CandyCruisers
         private bool PlayerRowIsFull()
         {
             if (grid == null || spawner == null) return false;
-            var target = player.HitBounds;
+            var target = player.LandingHitBounds;
             for (int row = 0; row < GridModel.Rows; row++)
             {
                 int occupied = 0;
@@ -733,6 +965,8 @@ namespace CandyCruisers
 
         private void OnDestroy()
         {
+            MenuBacklight.Shutdown();
+            MenuIntroAnimation.Shutdown();
             if (blackout != null)
             {
                 if (Application.isPlaying) Destroy(blackout.gameObject);
@@ -757,7 +991,7 @@ namespace CandyCruisers
 
         private void RecordLeaderboard()
         {
-            if (leaderboardRecorded) return;
+            if (leaderboardRecorded || PresentationPreview) return;
             leaderboardRecorded = true;
             LastLeaderboardRank = LocalLeaderboard.Submit(Progress.Score, Progress.Level);
         }
@@ -799,9 +1033,11 @@ namespace CandyCruisers
 
         private void DrawGui()
         {
+            if (OpeningWarningActive) { DrawEpilepsyWarning(); return; }
+            if (State == RunState.MainMenu) { DrawMinimalMainMenu(); return; }
             if (State != RunState.MainMenu) DrawProgress(GameOverScoreOpacity);
             if (State == RunState.GameOver) { DrawGameOver(); return; }
-            if (!IsPaused && (State == RunState.Playing || State == RunState.Refilling))
+            if (!PresentationPreview && !IsPaused && (State == RunState.Playing || State == RunState.Refilling))
             {
                 var pause = PauseButton;
                 if (GUI.Button(pause, new GUIContent("", "Pause (P)"))) Pause();
@@ -844,12 +1080,70 @@ namespace CandyCruisers
         }
 
         public const string GameOverTitle = "GAME OVER";
+        public static Rect EpilepsyWarningRect(float screenWidth, float screenHeight)
+        {
+            float width = Mathf.Min(720, Mathf.Max(120, screenWidth - 32));
+            float height = Mathf.Min(280, Mathf.Max(160, screenHeight - 32));
+            return new Rect((screenWidth - width) / 2, (screenHeight - height) / 2, width, height);
+        }
+
+        public static Rect EpilepsyWarningTitleRect(float screenWidth, float screenHeight)
+        {
+            var warning = EpilepsyWarningRect(screenWidth, screenHeight);
+            return new Rect(warning.x, warning.y, warning.width, Mathf.Min(42, warning.height * .25f));
+        }
+
+        public static Rect EpilepsyWarningMessageRect(float screenWidth, float screenHeight)
+        {
+            var warning = EpilepsyWarningRect(screenWidth, screenHeight);
+            var title = EpilepsyWarningTitleRect(screenWidth, screenHeight);
+            return new Rect(warning.x, title.yMax + 14, warning.width, warning.yMax - title.yMax - 14);
+        }
+
+        private void DrawEpilepsyWarning()
+        {
+            var previous = GUI.color;
+            GUI.color = Color.black;
+            GUI.DrawTexture(new Rect(0, 0, GuiWidth, GuiHeight), Texture2D.whiteTexture);
+            GUI.color = Color.white;
+            var titleRect = EpilepsyWarningTitleRect(GuiWidth, GuiHeight);
+            var messageRect = EpilepsyWarningMessageRect(GuiWidth, GuiHeight);
+            var title = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = GuiHeight < 400 ? 16 : GuiHeight < 600 ? 21 : 26,
+                alignment = TextAnchor.MiddleCenter,
+                wordWrap = false,
+                padding = new RectOffset()
+            };
+            title.normal.textColor = Color.white;
+            GUI.Label(titleRect, EpilepsyWarningTitle, title);
+            var message = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = GuiHeight < 400 ? 12 : GuiHeight < 600 ? 15 : 18,
+                alignment = TextAnchor.MiddleCenter,
+                wordWrap = true,
+                padding = new RectOffset()
+            };
+            message.normal.textColor = Color.white;
+            GUI.Label(messageRect, EpilepsyWarningMessage, message);
+            GUI.color = previous;
+        }
+
         public static Rect GameOverTitleRect(float screenWidth, float screenHeight)
         {
             float width = Mathf.Min(560, screenWidth - 32), height = Mathf.Min(96, screenHeight - 32);
             float top = Mathf.Max(16, screenHeight * .4f - height / 2);
             return new Rect((screenWidth - width) / 2, top, width, height);
         }
+
+        public static Rect GameOverSummaryRect(float screenWidth, float screenHeight)
+        {
+            var title = GameOverTitleRect(screenWidth, screenHeight);
+            return new Rect(title.x, title.yMax + 8, title.width, 26);
+        }
+
+        public static string GameOverSummaryText(int level, long score) =>
+            "LEVEL " + level + "    SCORE " + score.ToString("N0");
 
         public static int FitGameOverTitle(GUIStyle style, Rect rect)
         {
@@ -870,6 +1164,16 @@ namespace CandyCruisers
             var rect = GameOverTitleRect(GuiWidth, GuiHeight);
             FitGameOverTitle(title, rect);
             GUI.Label(rect, GameOverTitle, title);
+            var summary = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = GuiHeight < 400 ? 12 : GuiHeight < 600 ? 15 : 18,
+                alignment = TextAnchor.MiddleCenter,
+                wordWrap = false,
+                padding = new RectOffset()
+            };
+            summary.normal.textColor = Color.white;
+            GUI.Label(GameOverSummaryRect(GuiWidth, GuiHeight),
+                GameOverSummaryText(Progress.Level, Progress.Score), summary);
             GUI.color = previousColor;
         }
 
@@ -895,6 +1199,14 @@ namespace CandyCruisers
             new Rect(x, y + (menu ? 90 : paused ? 154 : 96), width, 40);
         public const string MainMenuTitle = "BASS INVADERS";
         public const string MainMenuSubtitle = "THE RHYTHM IS OUT THERE";
+        private static readonly string[] MainMenuTitleWords = { "BASS", "INVADERS" };
+        private static readonly string[] MainMenuSubtitleWords = { "THE", "RHYTHM", "IS", "OUT", "THERE" };
+        private static readonly Color[] MenuSubtitleBeatPalette = {
+            new Color(.015f, .45f, 1f), new Color(1f, .025f, .04f), new Color(1f, .62f, .01f),
+            new Color(.015f, 1f, .04f), new Color(.5f, .015f, 1f)
+        };
+        public static int MainMenuAnimatedWordCount => MainMenuTitleWords.Length + MainMenuSubtitleWords.Length;
+        public static float MenuWordIntroDuration => MenuIntroAnimation.Duration;
         public static float GuiScaleFor(bool mobilePlatform, float screenWidth, float screenHeight)
         {
             if (!mobilePlatform) return 1;
@@ -949,6 +1261,36 @@ namespace CandyCruisers
             return style.fontSize;
         }
 
+        public static float MainMenuWordRevealProgress(int wordIndex, float elapsed)
+        {
+            if (wordIndex < 0 || wordIndex >= MainMenuAnimatedWordCount) return 0;
+            return wordIndex < MainMenuTitleWords.Length ? 1 : MenuIntroAnimation.SubtitleProgress(elapsed);
+        }
+
+        public static Color MainMenuSubtitleBeatColor(float beatPosition, float opacity = 1)
+        {
+            var color = MainMenuPaletteColor(beatPosition, opacity);
+            color = Color.Lerp(color, Color.white, .35f * GameplayMusicPlayer.BeatPulse(beatPosition));
+            color.a = Mathf.Clamp01(opacity);
+            return color;
+        }
+
+        public static Color MainMenuCharacterColor(float beatPosition, float opacity = 1) =>
+            MainMenuPaletteColor(beatPosition, opacity);
+
+        private static Color MainMenuPaletteColor(float beatPosition, float opacity)
+        {
+            var color = MenuSubtitleBeatPalette[PositiveModulo(Mathf.FloorToInt(beatPosition), MenuSubtitleBeatPalette.Length)];
+            color.a = Mathf.Clamp01(opacity);
+            return color;
+        }
+
+        private static int PositiveModulo(int value, int divisor)
+        {
+            int result = value % divisor;
+            return result < 0 ? result + divisor : result;
+        }
+
         public static Rect ComboMultiplierRestRect(float playfieldX, float textWidth, float headingTop, int viewHeight = 960)
         {
             float width = Mathf.Min(118, textWidth * .35f);
@@ -995,6 +1337,10 @@ namespace CandyCruisers
             return new Color(Mathf.Lerp(.08f, source.r, .42f), Mathf.Lerp(.1f, source.g, .42f),
                 Mathf.Lerp(.12f, source.b, .42f), .28f * opacity);
         }
+
+        public static Color ColorClearBarPowerDownTint(EnemyColor color, float progress, float opacity = 1) =>
+            Color.Lerp(ColorClearBarTint(color, true, opacity), ColorClearBarTint(color, false, opacity),
+                Mathf.SmoothStep(0, 1, Mathf.Clamp01(progress)));
 
         public static Rect ComboMultiplierDisplayRect(Rect resting, float screenWidth, float screenHeight, float elapsed)
         {
@@ -1058,6 +1404,369 @@ namespace CandyCruisers
             FitMainMenuSubtitle(subtitle, subtitleRect);
             GUI.Label(titleRect, MainMenuTitle, title);
             GUI.Label(subtitleRect, MainMenuSubtitle, subtitle);
+        }
+
+        public static Rect MinimalTitleRect(float width, float height, float pulse)
+        {
+            float scale = 1 + .075f * Mathf.Clamp01(pulse);
+            float w = Mathf.Min(640, width - 40) * scale;
+            return new Rect((width - w) / 2, height * .43f - 42 * scale, w, 84 * scale);
+        }
+
+        public static float MenuArrivalJumpProgressFor(float elapsed) =>
+            Mathf.Clamp01(elapsed / MenuTakeoffSeconds);
+
+        public static float MenuArrivalFadeProgressFor(float elapsed) =>
+            Mathf.Clamp01((elapsed - MenuTakeoffSeconds) / Mathf.Max(.0001f, MenuArrivalSeconds - MenuTakeoffSeconds));
+
+        public static float MenuJumpVerticalScale(float progress) =>
+            PlayerLifeIcons.LossVerticalScale(Mathf.Lerp(0, PlayerLifeIcons.ApexProgress, Mathf.Clamp01(progress)));
+
+        public static Rect MenuJumpRect(Rect resting, float progress)
+        {
+            float t = Mathf.Clamp01(progress);
+            float scale = MenuJumpVerticalScale(t);
+            float lift = resting.height * .62f * Mathf.SmoothStep(0, 1, t);
+            var size = new Vector2(resting.width / Mathf.Sqrt(scale), resting.height * scale);
+            float bottom = resting.yMax - lift;
+            return new Rect(resting.center.x - size.x / 2, bottom - size.y, size.x, size.y);
+        }
+
+        private Rect PulsingTitleRect => MinimalTitleRect(GuiWidth, GuiHeight,
+            musicPlayer != null ? GameplayMusicPlayer.BeatPulse(musicPlayer.BeatPosition) : 0);
+
+        public static Rect MinimalSubtitleRect(float width, float height)
+        {
+            var title = MinimalTitleRect(width, height, 0);
+            return new Rect(title.x, title.center.y + 26, title.width, 34);
+        }
+
+        public static Rect MainMenuLevelSelectRect(float width, float height)
+        {
+            var subtitle = MinimalSubtitleRect(width, height);
+            float size = height < 520 ? 30 : height < 720 ? 34 : 40;
+            float rowWidth = Mathf.Min(width - 72, Mathf.Max(size * 3.8f, size * 2 + 86));
+            float y = Mathf.Min(height - size - 34, subtitle.yMax + (height < 520 ? 12 : 20));
+            y = Mathf.Max(subtitle.yMax + 8, y);
+            return new Rect((width - rowWidth) / 2, y, rowWidth, size);
+        }
+
+        public static Rect MainMenuLevelSelectLeftButtonRect(Rect row) =>
+            new Rect(row.x, row.y, row.height, row.height);
+
+        public static Rect MainMenuLevelSelectRightButtonRect(Rect row) =>
+            new Rect(row.xMax - row.height, row.y, row.height, row.height);
+
+        public static Rect MainMenuLevelSelectValueRect(Rect row)
+        {
+            float gap = Mathf.Max(8, row.height * .35f);
+            return new Rect(row.x + row.height + gap, row.y, row.width - row.height * 2 - gap * 2, row.height);
+        }
+
+        private GUIStyle MenuTitleStyle(Rect rect)
+        {
+            var style = new GUIStyle { font = ComboFont, fontSize = 56,
+                alignment = TextAnchor.MiddleCenter, wordWrap = false, padding = new RectOffset() };
+            style.normal.textColor = Color.white;
+            FitMainMenuTitle(style, MinimalTitleRect(GuiWidth, GuiHeight, 0));
+            style.fontSize = Mathf.RoundToInt(style.fontSize * rect.height / 84);
+            return style;
+        }
+
+        private Rect MenuPlayerRect()
+        {
+            var title = PulsingTitleRect;
+            var style = MenuTitleStyle(title);
+            // Bungee's capital ink sits above the line center; the feet follow that same pulsing edge.
+            float top = title.center.y - style.fontSize * .36f;
+            return PerchedPlayerRect(title.center.x, top, GameplayPlayerRect().size);
+        }
+
+        public static Rect PerchedPlayerRect(float centerX, float top, Vector2 gameplaySize) =>
+            new Rect(centerX - gameplaySize.x / 2, top - gameplaySize.y, gameplaySize.x, gameplaySize.y);
+
+        private Rect GameplayPlayerRect()
+        {
+            if (player == null || Camera.main == null) return default;
+            var body = CharacterVisuals.Ensure(player.gameObject).Body;
+            if (body == null) return default;
+            var lo = Camera.main.WorldToViewportPoint(body.bounds.min);
+            var hi = Camera.main.WorldToViewportPoint(body.bounds.max);
+            return new Rect(lo.x * GuiWidth, (1 - hi.y) * GuiHeight,
+                (hi.x - lo.x) * GuiWidth, (hi.y - lo.y) * GuiHeight);
+        }
+
+        private void DrawMinimalMainMenu()
+        {
+            var previous = GUI.color;
+            float fade = MenuArriving ? MenuArrivalFadeProgress : 0;
+            GUI.color = Color.black;
+            GUI.DrawTexture(new Rect(0, 0, GuiWidth, GuiHeight), Texture2D.whiteTexture);
+            var title = MenuIntroAnimation.TitleRect(PulsingTitleRect, GuiWidth, menuTitleElapsed);
+            float opacity = 1 - Mathf.SmoothStep(0, 1, fade * 1.8f);
+            var titleStyle = MenuTitleStyle(title);
+            var subtitleRect = MinimalSubtitleRect(GuiWidth, GuiHeight);
+            var subtitle = new GUIStyle(titleStyle) { fontSize = 24 };
+            FitMainMenuSubtitle(subtitle, subtitleRect);
+            float reveal = MenuIntroAnimation.SubtitleProgress(menuTitleElapsed);
+            var subtitleTransform = MenuIntroAnimation.SubtitleTransform(subtitleRect, menuTitleElapsed);
+            var art = player != null ? CharacterVisuals.Ensure(player.gameObject) : null;
+            var character = art != null ? MenuCharacterPose(art) : default;
+            float beat = musicPlayer != null ? musicPlayer.BeatPosition : 0;
+            Color lightColor = MainMenuSubtitleBeatColor(beat);
+            float lightOpacity = opacity * MainMenuWordRevealProgress(MainMenuTitleWords.Length, menuTitleElapsed);
+            if (Event.current.type == EventType.Repaint && lightOpacity > 0)
+            {
+                MenuBacklight.Begin(new Vector2(GuiWidth, GuiHeight));
+                int shadowWord = 0;
+                DrawAnimatedMenuWords(MainMenuTitleWords, title, titleStyle, menuTitleElapsed, 1, Color.white,
+                    ref shadowWord, true);
+                if (art != null && character.Visible)
+                {
+                    foreach (var piece in art.Root.GetComponentsInChildren<SpriteRenderer>())
+                        if (piece.enabled && piece.sprite != null)
+                            MenuBacklight.Sprite(piece.sprite, MenuPieceRect(piece.bounds, art.Body.bounds, character.Body), character.Transform);
+                }
+                var sourceRect = MenuBacklight.TextInkBounds(MainMenuSubtitle, subtitleRect, subtitle);
+                MenuBacklight.End(MenuIntroAnimation.TransformRect(sourceRect, subtitleTransform), lightColor, beat, lightOpacity, reveal);
+            }
+            int wordIndex = 0;
+            GUI.color = Color.white;
+            DrawAnimatedMenuWords(MainMenuTitleWords, title, titleStyle, menuTitleElapsed, opacity, Color.white,
+                ref wordIndex);
+            var previousMatrix = GUI.matrix;
+            // A fully edge-on subtitle has a singular transform; it is invisible at that point.
+            GUI.matrix = reveal > .001f ? previousMatrix * subtitleTransform : previousMatrix;
+            // The subtitle stays saturated; its colored glow is the visible light source.
+            for (int i = 0; i < 8; i++)
+            {
+                float angle = i * Mathf.PI / 4;
+                var glowRect = subtitleRect;
+                glowRect.position += new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)) * 3.5f;
+                int glowWord = MainMenuTitleWords.Length;
+                DrawAnimatedMenuWords(MainMenuSubtitleWords, glowRect, subtitle, menuTitleElapsed,
+                    opacity * .08f * MenuBacklight.Intensity(beat), lightColor, ref glowWord);
+            }
+            // A fine white keyline separates the solid letter faces from their own light.
+            for (int i = 0; i < 8; i++)
+            {
+                float angle = i * Mathf.PI / 4;
+                var outlineRect = subtitleRect;
+                outlineRect.position += new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
+                int outlineWord = MainMenuTitleWords.Length;
+                DrawAnimatedMenuWords(MainMenuSubtitleWords, outlineRect, subtitle, menuTitleElapsed,
+                    opacity * .8f, Color.white, ref outlineWord);
+            }
+            DrawAnimatedMenuWords(MainMenuSubtitleWords, subtitleRect, subtitle, menuTitleElapsed, opacity,
+                lightColor, ref wordIndex);
+            GUI.matrix = previousMatrix;
+            DrawMainMenuLevelSelect(beat, opacity);
+            if (art != null && character.Visible)
+            {
+                GUI.matrix = previousMatrix * character.Transform;
+                var eyeTarget = MenuEyeTarget();
+                if (eyeTarget.HasValue) eyeTarget = character.Transform.inverse.MultiplyPoint3x4(eyeTarget.Value);
+                DrawMenuCharacter(art, character.Body, eyeTarget,
+                    MenuEntranceForwardGazeFor(menuTitleElapsed, MenuArriving), MainMenuCharacterColor(beat));
+                GUI.matrix = previousMatrix;
+                if (!MenuArriving && MenuEntrance == MenuIntroAnimation.Entrance.TractorBeam)
+                    MenuIntroAnimation.DrawBeam(MenuPlayerRect(), menuTitleElapsed);
+            }
+            GUI.color = previous;
+        }
+
+        private void DrawMainMenuLevelSelect(float beat, float opacity)
+        {
+            if (!MainMenuLevelSelectVisible) return;
+            var row = MainMenuLevelSelectRect(GuiWidth, GuiHeight);
+            var color = MainMenuSubtitleBeatColor(beat, opacity);
+            float thickness = Mathf.Max(1, Mathf.Round(row.height * .05f));
+            DrawLevelSelectArrow(MainMenuLevelSelectLeftButtonRect(row), true, color, thickness);
+            DrawLevelSelectArrow(MainMenuLevelSelectRightButtonRect(row), false, color, thickness);
+            var value = MainMenuLevelSelectValueRect(row);
+            var style = new GUIStyle
+            {
+                font = ComboFont,
+                fontSize = Mathf.RoundToInt(row.height * .9f),
+                alignment = TextAnchor.MiddleCenter,
+                wordWrap = false,
+                clipping = TextClipping.Clip,
+                padding = new RectOffset()
+            };
+            style.normal.textColor = color;
+            string text = StartLevel.ToString();
+            var content = new GUIContent(text);
+            while (style.fontSize > 12 && style.CalcSize(content).x > value.width) style.fontSize--;
+            GUI.Label(value, text, style);
+        }
+
+        private static void DrawLevelSelectArrow(Rect rect, bool left, Color color, float thickness)
+        {
+            DrawThinRect(rect, thickness, color);
+            float back = left ? rect.xMax - rect.width * .34f : rect.x + rect.width * .34f;
+            float tip = left ? rect.x + rect.width * .36f : rect.xMax - rect.width * .36f;
+            var upper = new Vector2(back, rect.y + rect.height * .28f);
+            var middle = new Vector2(tip, rect.center.y);
+            var lower = new Vector2(back, rect.yMax - rect.height * .28f);
+            DrawThinLine(upper, middle, thickness, color);
+            DrawThinLine(middle, lower, thickness, color);
+        }
+
+        private static void DrawThinRect(Rect rect, float thickness, Color color)
+        {
+            var previous = GUI.color;
+            GUI.color = color;
+            GUI.DrawTexture(new Rect(rect.x, rect.y, rect.width, thickness), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(rect.x, rect.yMax - thickness, rect.width, thickness), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(rect.x, rect.y, thickness, rect.height), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(rect.xMax - thickness, rect.y, thickness, rect.height), Texture2D.whiteTexture);
+            GUI.color = previous;
+        }
+
+        private static void DrawThinLine(Vector2 start, Vector2 end, float thickness, Color color)
+        {
+            var delta = end - start;
+            if (delta.sqrMagnitude <= .0001f) return;
+            var previousColor = GUI.color;
+            var previousMatrix = GUI.matrix;
+            GUI.color = color;
+            GUIUtility.RotateAroundPivot(Mathf.Atan2(delta.y, delta.x) * Mathf.Rad2Deg, start);
+            GUI.DrawTexture(new Rect(start.x, start.y - thickness / 2, delta.magnitude, thickness), Texture2D.whiteTexture);
+            GUI.matrix = previousMatrix;
+            GUI.color = previousColor;
+        }
+
+        private MenuIntroAnimation.Pose MenuCharacterPose(CharacterVisuals art)
+        {
+            var target = MenuPlayerRect();
+            if (MenuArriving && menuDeparture.width <= 0) menuDeparture = target;
+            if (!MenuArriving) return MenuIntroAnimation.CharacterPose(target, GuiWidth, menuTitleElapsed, MenuEntrance);
+            if (Camera.main == null || art.Body == null) return new MenuIntroAnimation.Pose(target);
+            float fade = MenuArrivalFadeProgress;
+            var departure = MenuJumpRect(menuDeparture, 1);
+            var destination = GameplayPlayerRect();
+            float ease = Mathf.SmoothStep(0, 1, fade);
+            return new MenuIntroAnimation.Pose(fade <= 0 ? MenuJumpRect(menuDeparture, MenuArrivalJumpProgress) :
+                new Rect(Vector2.Lerp(departure.position, destination.position, ease),
+                    Vector2.Lerp(departure.size, destination.size, ease)));
+        }
+
+        private Vector2? MenuEyeTarget() =>
+            MenuEyeTargetFor(Application.isMobilePlatform, Input.mousePresent, Input.mousePosition, GuiScale, GuiHeight,
+                MenuEyeTrackingReady);
+
+        public static Vector2? MenuEyeTargetFor(bool mobilePlatform, bool mousePresent, Vector2 mousePosition,
+            float guiScale, float guiHeight, bool trackingReady = true)
+        {
+            if (!trackingReady || mobilePlatform || !mousePresent) return null;
+            var point = mousePosition / Mathf.Max(.0001f, guiScale);
+            return new Vector2(point.x, guiHeight - point.y);
+        }
+
+        public static bool MenuEntranceForwardGazeFor(float elapsed, bool arriving) =>
+            !arriving && elapsed >= MenuIntroAnimation.CharacterStart && elapsed < MenuWordIntroDuration;
+
+        private void TickMenuEyeTrackingDelay(float seconds)
+        {
+            if (!menuEyeDelayStarted)
+            {
+                menuEyeDelayStarted = true;
+                menuEyeDelaySeconds = musicPlayer != null ?
+                    musicPlayer.SecondsForBeats(GameplayMusicPlayer.BeatsPerMeasure) :
+                    GameplayMusicPlayer.BeatsPerMeasure * CurrentBeatDuration;
+                menuEyeDelaySeconds = Mathf.Max(.0001f, menuEyeDelaySeconds);
+            }
+            menuEyeDelayElapsed = Mathf.Min(menuEyeDelaySeconds,
+                menuEyeDelayElapsed + Mathf.Max(0, seconds));
+        }
+
+        private static void DrawAnimatedMenuWords(string[] words, Rect lineRect, GUIStyle style, float elapsed,
+            float opacity, Color color, ref int wordIndex, bool shadow = false)
+        {
+            if (words == null || words.Length == 0 || opacity <= 0) return;
+            float space = style.CalcSize(new GUIContent(" ")).x;
+            float total = 0;
+            var widths = new float[words.Length];
+            for (int i = 0; i < words.Length; i++)
+            {
+                widths[i] = style.CalcSize(new GUIContent(words[i])).x;
+                total += widths[i];
+            }
+            total += space * (words.Length - 1);
+            float x = lineRect.center.x - total / 2f;
+            var wordStyle = new GUIStyle(style);
+            for (int i = 0; i < words.Length; i++, wordIndex++)
+            {
+                float progress = MainMenuWordRevealProgress(wordIndex, elapsed);
+                if (progress > .001f)
+                {
+                    color.a = opacity * progress;
+                    wordStyle.normal.textColor = color;
+                    var wordRect = new Rect(x, lineRect.y, widths[i], lineRect.height);
+                    if (shadow) MenuBacklight.Word(words[i], wordRect, wordStyle, progress);
+                    else GUI.Label(wordRect, words[i], wordStyle);
+                }
+                x += widths[i] + space;
+            }
+        }
+
+        public static bool IsMenuEyePiece(SpriteRenderer piece)
+        {
+            if (piece == null) return false;
+            var name = piece.name;
+            return name == "Pupil" || name.Contains("Pupil");
+        }
+
+        public static Rect MenuEyeFollowRect(Rect pupil, Rect eye, Vector2 mousePosition)
+        {
+            var delta = mousePosition - eye.center;
+            var travel = new Vector2(Mathf.Max(0, eye.width - pupil.width),
+                Mathf.Max(0, eye.height - pupil.height)) * .4f;
+            var offset = Vector2.Scale(Vector2.ClampMagnitude(delta / 180f, 1), travel);
+            // Discard the authored upward gaze before applying the cursor direction.
+            return new Rect(eye.center + offset - pupil.size / 2, pupil.size);
+        }
+
+        private static Rect MenuPieceRect(Bounds part, Bounds body, Rect target) =>
+            new Rect(target.x + (part.min.x - body.min.x) / body.size.x * target.width,
+                target.y + (body.max.y - part.max.y) / body.size.y * target.height,
+                part.size.x / body.size.x * target.width, part.size.y / body.size.y * target.height);
+
+        private static void DrawMenuCharacter(CharacterVisuals art, Rect target, Vector2? eyeTarget,
+            bool forwardGaze, Color bodyColor)
+        {
+            if (art.Body == null || art.Body.sprite == null) return;
+            var bounds = art.Body.bounds;
+            var pieces = art.Root.GetComponentsInChildren<SpriteRenderer>();
+            System.Array.Sort(pieces, (a, b) => a.sortingOrder.CompareTo(b.sortingOrder));
+            foreach (var piece in pieces)
+            {
+                if (piece.sprite == null || !piece.enabled) continue;
+                var rect = MenuPieceRect(piece.bounds, bounds, target);
+                if ((eyeTarget.HasValue || forwardGaze) && IsMenuEyePiece(piece))
+                {
+                    SpriteRenderer eye = null;
+                    float nearest = float.PositiveInfinity;
+                    foreach (var candidate in pieces)
+                    {
+                        if (candidate.name != "Eye" || candidate.sprite == null || !candidate.enabled) continue;
+                        float distance = (candidate.bounds.center - piece.bounds.center).sqrMagnitude;
+                        if (distance >= nearest) continue;
+                        eye = candidate;
+                        nearest = distance;
+                    }
+                    if (eye != null)
+                    {
+                        var eyeRect = MenuPieceRect(eye.bounds, bounds, target);
+                        rect = MenuEyeFollowRect(rect, eyeRect, forwardGaze ? eyeRect.center : eyeTarget.Value);
+                    }
+                }
+                var source = piece.sprite.rect;
+                var texture = piece.sprite.texture;
+                GUI.color = piece == art.Body ? bodyColor : piece.color;
+                GUI.DrawTextureWithTexCoords(rect, texture, new Rect(source.x / texture.width,
+                    source.y / texture.height, source.width / texture.width, source.height / texture.height));
+            }
         }
 
         private void DrawEnemyPreview(Rect area)
@@ -1163,6 +1872,8 @@ namespace CandyCruisers
                 bar.width + expansion * 2, bar.height + expansion * 1.1f);
         }
 
+        public const float LevelProgressBaseHeight = 9f * 1.5f;
+
         private static void DrawPreviewSprite(Rect rect, Sprite sprite, Color tint)
         {
             if (sprite == null || sprite.texture == null) return;
@@ -1194,7 +1905,7 @@ namespace CandyCruisers
             float textWidth = width - 54;
             float beat = musicPlayer != null ? musicPlayer.BeatPosition : Time.time / FullSetCelebration.StepDuration;
             float pulse = GameplayMusicPlayer.BeatPulse(beat);
-            var progressBar = new Rect(x, progressY, width, 9);
+            var progressBar = new Rect(x, progressY, width, LevelProgressBaseHeight);
             var solidBar = LevelProgressSolidRect(progressBar, Progress.LevelUpPending, pulse);
             GUI.color = new Color(.3f, .4f, .45f, .7f * opacity);
             GUI.DrawTexture(progressBar, Texture2D.whiteTexture);
@@ -1217,12 +1928,12 @@ namespace CandyCruisers
                 GUI.color = banked;
                 GUI.DrawTexture(LevelProgressBankedRect(solidBar, Progress.BankedLevelProgressFraction), Texture2D.whiteTexture);
             }
-            var colors = ColorClearBarColors(spawner, grid);
+            var colors = DisplayedColorClearBarColors;
             float bottom = GuiHeight - ToGuiPoint(camera.WorldToScreenPoint(new Vector3(0, -5.25f, 0))).y;
             for (int i = 0; i < colors.Count; i++)
             {
                 var color = colors[i];
-                var resting = ColorClearBarSlotRect(x, bottom, width, colors.Count, i);
+                var resting = DisplayedColorClearBarSlotRect(new Rect(x, bottom, width, 5), i);
                 bool powered = grid != null && grid.HasColorClearBar(color) && ClearCelebration.Visible(color);
                 if (!powered)
                 {
@@ -1234,7 +1945,12 @@ namespace CandyCruisers
                 // The enlarged bar stays inside the playfield, including the end slots.
                 animated.width = Mathf.Min(animated.width, width);
                 animated.x = Mathf.Clamp(animated.x, x, x + width - animated.width);
-                DrawPoweredColorClearBar(color, animated, opacity, beat, i);
+                float drain = ClearCelebration.PowerDownProgressFor(color);
+                if (ClearCelebration.SimultaneousPowerDown || drain > 0)
+                    DrawPoweringDownColorClearBar(color, animated, opacity, drain);
+                else if (ClearCelebration.Active)
+                    DrawPoweredColorClearBar(color, animated, opacity, beat, i, false);
+                else DrawPoweredColorClearBar(color, animated, opacity, beat, i);
             }
             var comboRect = ComboMultiplierRestRect(x, textWidth, y, viewHeight);
             int comboFontSize = viewHeight < 400 ? 11 : viewHeight < 600 ? 13 : 16;
@@ -1291,9 +2007,9 @@ namespace CandyCruisers
             GUI.DrawTexture(resting, Texture2D.whiteTexture);
         }
 
-        private static void DrawPoweredColorClearBar(EnemyColor color, Rect resting, float opacity, float beatPosition, int slot)
+        private static void DrawPoweredColorClearBar(EnemyColor color, Rect resting, float opacity, float beatPosition, int slot, bool equalizer = true)
         {
-            var level = ColorClearBarLevelRect(resting, beatPosition, slot);
+            var level = equalizer ? ColorClearBarLevelRect(resting, beatPosition, slot) : resting;
             float pulse = ColorClearBarMusicLevel(beatPosition, slot);
             var tint = ColorClearBarTint(color, true, opacity);
             var glow = tint;
@@ -1309,6 +2025,30 @@ namespace CandyCruisers
             shine.a = .35f * opacity;
             GUI.color = shine;
             GUI.DrawTexture(new Rect(level.x, level.y, level.width, Mathf.Min(3, level.height * .28f)), Texture2D.whiteTexture);
+        }
+
+        private static void DrawPoweringDownColorClearBar(EnemyColor color, Rect rect, float opacity, float progress)
+        {
+            float t = Mathf.SmoothStep(0, 1, Mathf.Clamp01(progress));
+            float fade = 1 - t;
+            var tint = ColorClearBarPowerDownTint(color, progress, opacity);
+            var shadow = ColorClearBarTint(color, false, opacity);
+            shadow.a *= .5f * t;
+            GUI.color = shadow;
+            GUI.DrawTexture(new Rect(rect.x, rect.y + 1, rect.width, rect.height), Texture2D.whiteTexture);
+            var glow = tint;
+            glow.a = .16f * opacity * fade;
+            GUI.color = glow;
+            GUI.DrawTexture(Expanded(rect, 6 * fade, 6 * fade), Texture2D.whiteTexture);
+            glow.a *= .45f;
+            GUI.color = glow;
+            GUI.DrawTexture(Expanded(rect, 3 * fade, 3 * fade), Texture2D.whiteTexture);
+            GUI.color = tint;
+            GUI.DrawTexture(rect, Texture2D.whiteTexture);
+            var shine = Color.Lerp(tint, Color.white, .45f * fade);
+            shine.a = .22f * opacity * fade;
+            GUI.color = shine;
+            GUI.DrawTexture(new Rect(rect.x, rect.y, rect.width, Mathf.Min(3, rect.height * .22f)), Texture2D.whiteTexture);
         }
 
         private static Rect Expanded(Rect rect, float x, float y) =>

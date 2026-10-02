@@ -16,6 +16,10 @@ namespace CandyCruisers
         [SerializeField] private TongueShot tongue;
         [SerializeField] private SpriteRenderer body;
         private const float HitboxScale = 0.72f;
+        private float horizontalDirection;
+        private int horizontalMovementFrame = -10;
+        public float HorizontalDirection => Alive && !Stunned && !ControlsLocked &&
+            Time.frameCount - horizontalMovementFrame <= 1 ? horizontalDirection : 0;
         private Camera view;
         private int finger = -1;
         private Vector2 pointerStart;
@@ -76,11 +80,17 @@ namespace CandyCruisers
             return null;
         }
         public Color DisplayColor => body != null ? body.color : Color.gray;
+        public EnemyColor? ReturnColorPreview => returnColorPrepared ?
+            returnColor ?? ReadyColor ?? (tongue != null && tongue.Active ? tongue.ShotColor : (EnemyColor?)null) : null;
+        public Color AccentColor => LifeIcons.RewardColor.HasValue ? EnemyPalette.Get(LifeIcons.RewardColor.Value) :
+            ReturnColorPreview.HasValue ? EnemyPalette.Get(ReturnColorPreview.Value) : DisplayColor;
         public void RefreshPresentation(float time)
         {
             if (body == null) return;
+            var shock = GetComponent<PlayerShockVisual>();
+            if (shock != null && shock.BodyTint.HasValue) { body.color = shock.BodyTint.Value; return; }
             if (CelebrationColor.HasValue) { body.color = CelebrationColor.Value; return; }
-            if (Stunned) { body.color = Color.gray; return; }
+            if (Stunned) { if (tongue == null || !tongue.ShockActive) body.color = Color.gray; return; }
             bool magic = MagicCharges > 0 && pendingMagicAbsorptions == 0 ||
                 tongue != null && tongue.Active && tongue.IsMagic;
             var music = Music;
@@ -101,7 +111,7 @@ namespace CandyCruisers
         public event System.Action FatalHit;
         private void OnEnable() => SubscribeToGrid();
         private void OnDisable() { UnsubscribeFromGrid(); ClearRecoveryCue(); }
-        private void OnDestroy() { UnsubscribeFromGrid(); ClearRecoveryCue(); }
+        private void OnDestroy() { UnsubscribeFromGrid(); ClearRecoveryCue(); LifeIcons.Dispose(); }
         private void SubscribeToGrid()
         {
             if (grid == subscribedGrid && tongue == subscribedTongue) return;
@@ -110,6 +120,7 @@ namespace CandyCruisers
             if (subscribedTongue != null) subscribedTongue.Finished += OnShotFinished;
             if (subscribedTongue != null) subscribedTongue.RetractionStarted += OnRetractionStarted;
             if (subscribedTongue != null) subscribedTongue.Deflected += OnDeflected;
+            if (subscribedTongue != null) subscribedTongue.ShieldShockArrived += OnShieldShockArrived;
             subscribedGrid = grid;
             if (subscribedGrid == null) return;
             subscribedGrid.ColorCleared += AwardMagic;
@@ -122,6 +133,7 @@ namespace CandyCruisers
             if (subscribedTongue != null) subscribedTongue.Finished -= OnShotFinished;
             if (subscribedTongue != null) subscribedTongue.RetractionStarted -= OnRetractionStarted;
             if (subscribedTongue != null) subscribedTongue.Deflected -= OnDeflected;
+            if (subscribedTongue != null) subscribedTongue.ShieldShockArrived -= OnShieldShockArrived;
             subscribedTongue = null;
             if (subscribedGrid == null) return;
             subscribedGrid.ColorCleared -= AwardMagic;
@@ -149,6 +161,7 @@ namespace CandyCruisers
         }
         private void OnShotFinished()
         {
+            GetComponent<PlayerShockVisual>()?.BeginRecovery();
             Stunned = false;
             pendingMagicAbsorptions = 0;
             if (returnColorPrepared) ReadyColor = returnColor;
@@ -161,8 +174,8 @@ namespace CandyCruisers
         }
         private void OnRetractionStarted()
         {
-            ShotRetractionStarted?.Invoke(shotHitEnemy);
             PrepareReturnColor(true);
+            ShotRetractionStarted?.Invoke(shotHitEnemy);
         }
 
         private void PrepareReturnColor(bool reroll)
@@ -178,6 +191,13 @@ namespace CandyCruisers
             finger = -1;
             RefreshPresentation(Time.time);
         }
+        private void OnShieldShockArrived()
+        {
+            var shock = GetComponent<PlayerShockVisual>();
+            if (shock == null) shock = gameObject.AddComponent<PlayerShockVisual>();
+            shock.Begin();
+            RefreshPresentation(Time.time);
+        }
         private void ResetMagic() { MagicCharges = 0; pendingMagicAbsorptions = 0; }
         private void OnLastYellowTransformed()
         {
@@ -187,6 +207,19 @@ namespace CandyCruisers
         private float recoveryRemaining;
         private float recoveryElapsed;
         private bool awaitingRespawn;
+        private bool replacementJump;
+        private Vector3 replacementApex;
+        private float replacementLandingY, replacementLandingX, replacementLastX;
+        public bool ReplacementFalling => replacementJump && !awaitingRespawn;
+        public Bounds LandingHitBounds
+        {
+            get
+            {
+                var bounds = HitBounds;
+                if (replacementJump) bounds.center += Vector3.up * (replacementLandingY - transform.position.y);
+                return bounds;
+            }
+        }
         private PresentationCue recoveryCue;
         private void ClearRecoveryCue()
         {
@@ -207,8 +240,9 @@ namespace CandyCruisers
         }
         public bool FatallyDefeated { get; private set; }
         private bool fatalAnimationStarted;
-        public bool Alive => !FatallyDefeated && !awaitingRespawn && recoveryRemaining <= 1.5f && (recoveryCue == null || recoveryCue.Finished);
-        public bool Invulnerable => recoveryRemaining > 0;
+        public bool Alive => !FatallyDefeated && !awaitingRespawn;
+        public bool RespawnProtectionActive => !replacementJump && recoveryRemaining > 0;
+        public bool Invulnerable => ReplacementFalling || RespawnProtectionActive;
         public Bounds HitBounds
         {
             get
@@ -221,6 +255,8 @@ namespace CandyCruisers
 
         public void PrepareFatalDefeat()
         {
+            GetComponent<PlayerShockVisual>()?.ResetEffect();
+            CharacterVisuals.Ensure(gameObject).ResetJumpPose();
             if (FatallyDefeated) return;
             grid?.ResetColorClearStreak();
             Lives = 0;
@@ -244,6 +280,12 @@ namespace CandyCruisers
 
         public void ResetForRun()
         {
+            GetComponent<PlayerShockVisual>()?.ResetEffect();
+            CharacterVisuals.Ensure(gameObject).ResetJumpPose();
+            horizontalDirection = 0;
+            horizontalMovementFrame = -10;
+            if (replacementJump) transform.position = new Vector3(transform.position.x, replacementLandingY, transform.position.z);
+            replacementJump = false;
             CelebrationColor = null;
             Lives = MaxLives;
             LifeIcons.Reset();
@@ -278,6 +320,8 @@ namespace CandyCruisers
         {
             if (DeveloperOptions.PlayerInvincible) return false;
             if (ControlsLocked || FatallyDefeated || !Alive || (!ignoreInvulnerability && Invulnerable)) return false;
+            GetComponent<PlayerShockVisual>()?.ResetEffect();
+            CharacterVisuals.Ensure(gameObject).ResetJumpPose();
             grid?.ResetColorClearStreak();
             ClearRecoveryCue();
             Lives = Mathf.Max(0, Lives - 1);
@@ -292,10 +336,15 @@ namespace CandyCruisers
                 if (!FatallyDefeated) BeginFatalDefeat();
                 return true;
             }
-            recoveryRemaining = 3f;
+            if (!replacementJump) replacementLandingY = transform.position.y;
+            replacementLandingX = transform.position.x;
+            replacementJump = true;
+            recoveryRemaining = 0;
             recoveryElapsed = 0;
             awaitingRespawn = true;
             LifeIcons.BeginLoss(ExtraLives);
+            replacementApex = LifeIcons.ApexWorldPosition(this);
+            replacementLastX = replacementApex.x;
             recoveryCue = CharacterVisuals.Ensure(gameObject).PlayerDefeat(ReadyColor ?? EnemyColor.Blue);
             if (recoveryCue != null) recoveryCue.enabled = false;
             ShowPlayer(false);
@@ -305,24 +354,55 @@ namespace CandyCruisers
         public void TickSurvival(float seconds)
         {
             if (FatallyDefeated || grid != null && grid.GetComponent<GameSession>()?.IsPaused == true) return;
-            if (recoveryRemaining <= 0 && !awaitingRespawn && !LifeIcons.Animating && (recoveryCue == null || recoveryCue.Finished)) return;
             seconds = Mathf.Max(0, seconds);
-            bool wasAlive = Alive;
-            float deathRemaining = recoveryCue != null ? recoveryCue.RemainingSeconds :
-                Mathf.Max(0, PlayerDeathBurst.Duration - recoveryElapsed);
-            if (awaitingRespawn)
-                recoveryRemaining = Mathf.Max(recoveryRemaining, deathRemaining + 1.5f);
             LifeIcons.Tick(seconds, Music);
+            if (recoveryRemaining <= 0 && !replacementJump && !LifeIcons.Animating && (recoveryCue == null || recoveryCue.Finished)) return;
+            bool wasAlive = Alive;
             if (recoveryCue != null) recoveryCue.Tick(seconds);
-            recoveryElapsed += seconds;
-            recoveryRemaining = Mathf.Max(0, recoveryRemaining - seconds);
-            if (awaitingRespawn && recoveryRemaining <= 1.5f && (recoveryCue == null || recoveryCue.Finished))
+            if (replacementJump)
             {
-                if (TryPlaceRespawn()) awaitingRespawn = false;
-                else recoveryRemaining = 1.5f;
+                bool waitingForLanding = recoveryElapsed >= PlayerLifeIcons.Duration;
+                recoveryElapsed += seconds;
+                if (awaitingRespawn && recoveryElapsed >= PlayerLifeIcons.ApexSeconds)
+                {
+                    awaitingRespawn = false;
+                    LifeIcons.HandOffLoss();
+                    transform.position = replacementApex;
+                }
+                if (!awaitingRespawn)
+                {
+                    bool landed = recoveryElapsed >= PlayerLifeIcons.Duration;
+                    float fall = landed ? 1 : Mathf.Clamp01((recoveryElapsed - PlayerLifeIcons.ApexSeconds) /
+                        (PlayerLifeIcons.Duration - PlayerLifeIcons.ApexSeconds));
+                    float travel = fall * fall;
+                    float plannedX = Mathf.Lerp(replacementApex.x, replacementLandingX, fall);
+                    float x = Wrap(transform.position.x + plannedX - replacementLastX);
+                    replacementLastX = plannedX;
+                    transform.position = new Vector3(x, Mathf.Lerp(replacementApex.y, replacementLandingY, travel), transform.position.z);
+                    if (landed)
+                    {
+                        if (TryPlaceRespawn())
+                        {
+                            replacementJump = false;
+                            CharacterVisuals.Ensure(gameObject).BeginLanding(waitingForLanding ? 0 :
+                                Mathf.Max(0, recoveryElapsed - PlayerLifeIcons.Duration));
+                            recoveryRemaining = waitingForLanding ? 1.5f :
+                                Mathf.Max(0, 1.5f - Mathf.Max(0, recoveryElapsed - PlayerLifeIcons.Duration));
+                        }
+                        else
+                        {
+                            // Airborne protection is untimed; landing starts the flashing recovery interval.
+                            transform.position += Vector3.up * .8f;
+                            recoveryElapsed = PlayerLifeIcons.Duration;
+                        }
+                    }
+                }
             }
+            else recoveryRemaining = Mathf.Max(0, recoveryRemaining - seconds);
+            CharacterVisuals.Ensure(gameObject).SetJumpStretch(ReplacementFalling
+                ? PlayerLifeIcons.LossVerticalScale(recoveryElapsed / PlayerLifeIcons.Duration) : 1);
             if (!wasAlive && Alive) RefreshColor(true);
-            ShowPlayer(Alive && (!Invulnerable || Mathf.FloorToInt(recoveryRemaining * 8) % 2 == 0));
+            ShowPlayer(Alive && (!RespawnProtectionActive || Mathf.FloorToInt(recoveryRemaining * 8) % 2 == 0));
         }
 
         private bool TryPlaceRespawn()
@@ -542,6 +622,8 @@ namespace CandyCruisers
 
         private void MoveHorizontal(float distance)
         {
+            horizontalDirection = 0;
+            horizontalMovementFrame = Time.frameCount;
             var session = grid != null ? grid.GetComponent<GameSession>() : null;
             // Wrap is a teleport, not a sweep through the middle of the field.
             while (Mathf.Abs(distance) > .000001f && !ControlsLocked)
@@ -551,6 +633,7 @@ namespace CandyCruisers
                 float segment = direction * Mathf.Min(Mathf.Abs(distance), Mathf.Abs(edge - transform.position.x));
                 float fraction = session != null ? session.ContactFraction(-segment) : 1;
                 transform.position += Vector3.right * (segment * fraction);
+                if (Mathf.Abs(segment * fraction) > .000001f) horizontalDirection = direction;
                 if (session != null) session.FinishContactMove(fraction);
                 if (ControlsLocked) return;
                 distance -= segment;

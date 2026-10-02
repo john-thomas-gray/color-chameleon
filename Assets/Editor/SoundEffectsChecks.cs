@@ -11,7 +11,7 @@ namespace CandyCruisers.Editor
             { "AnotherJoe", "PotentialForAnything", "DiscoDescent", "GameplayMusic", "Skanska",
                 "TheThirdKind", "DownToEarthPart1", "UntilICollapse", "WarOnActivism",
                 "IntergalacticEmotionalBreakdown", "ShootingRobotsInSpace", "VertexStage1",
-                "CountingMetronome" };
+                "Contact", "CountingMetronome" };
 
         public static void ReimportSoundtrackAndCheckGameplay()
         {
@@ -492,12 +492,12 @@ namespace CandyCruisers.Editor
                     }
                     Check(!source.isPlaying && source.volume == 0 && !music.ShouldPlayMusic,
                         "Music is fully stopped at the blackout boundary before any shatter");
-                    session.Tick(PlayerDeathBurst.ShatterSeconds + .001f);
+                    session.Tick(PlayerDeathBurst.ShatterSoundSeconds + .001f);
                     var shatter = grid.GetComponent<SoundEffects>().GetClip(SoundEffect.PlayerShatter);
                     Check(Array.Exists(grid.GetComponentsInChildren<AudioSource>(), voice =>
                         voice.clip == shatter && voice != source && voice.pitch == 1),
                         "The shatter uses its own full-speed voice, unaffected by the slowed music");
-                    session.Tick(PlayerDeathBurst.Duration);
+                    session.Tick(PlayerFatalDustBurst.Duration);
                     music.UpdatePlayback(); music.UpdatePlayback();
                     Check(session.State == GameSession.RunState.GameOver && !source.isPlaying && source.volume == 0 && source.pitch == 1,
                         "Game over stays silent and clears the music-only pitch override");

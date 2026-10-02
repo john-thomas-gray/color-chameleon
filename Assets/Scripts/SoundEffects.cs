@@ -46,13 +46,29 @@ namespace CandyCruisers
         public bool PlayCue(SoundEffect effect, float pitch = 1)
         {
             if (!isActiveAndEnabled || Paused || !IsPlayableEffect(effect)) return false;
-            AudioSource source = oneShots.Find(voice => voice != null && !voice.isPlaying);
-            if (source == null && oneShots.Count < 24)
-            { source = CreateVoice(transform); oneShots.Add(source); }
-            if (source == null) source = oneShots[nextVoice++ % oneShots.Count];
+            AudioSource source = NextOneShotVoice();
             if (!Play(effect, source, pitch)) return false;
             CuePlayed?.Invoke(effect, Mathf.Clamp(pitch, .5f, 3));
             return true;
+        }
+
+        public bool PlayCueForDuration(SoundEffect effect, float seconds, float pitch = 1)
+        {
+            if (!isActiveAndEnabled || Paused || !IsPlayableEffect(effect)) return false;
+            AudioSource source = NextOneShotVoice();
+            if (!Play(effect, source, pitch)) return false;
+            if (source.clip != null && seconds > .0001f)
+                source.pitch = Mathf.Clamp(source.clip.length / seconds, .01f, 3f);
+            CuePlayed?.Invoke(effect, Mathf.Clamp(pitch, .5f, 3));
+            return true;
+        }
+
+        private AudioSource NextOneShotVoice()
+        {
+            AudioSource source = oneShots.Find(voice => voice != null && !voice.isPlaying);
+            if (source == null && oneShots.Count < 24)
+            { source = CreateVoice(transform); oneShots.Add(source); }
+            return source ?? oneShots[nextVoice++ % oneShots.Count];
         }
 
         private void OnEnable()

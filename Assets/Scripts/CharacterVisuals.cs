@@ -24,13 +24,64 @@ namespace CandyCruisers
         public SpriteRenderer Body => body;
         public Transform Root => visualRoot;
         private Transform beatRoot;
+        private Transform jumpRoot;
+        private float jumpBaseY;
+        public const float LandingSeconds = .3f;
+        private float landingElapsed = LandingSeconds, flightStretch = 1;
+        public bool LandingActive => landingElapsed < LandingSeconds;
+
+        public static float LandingScale(float progress)
+        {
+            float t = Mathf.Clamp01(progress);
+            return t < .4f ? 1 - .22f * Mathf.Sin(Mathf.PI * t / .4f)
+                : 1 + .10f * Mathf.Sin(Mathf.PI * (t - .4f) / .6f);
+        }
+        public void BeginLanding(float elapsed = 0)
+        {
+            landingElapsed = Mathf.Clamp(elapsed, 0, LandingSeconds);
+            SetJumpStretch(1);
+        }
+        public void TickLanding(float seconds)
+        {
+            if (!LandingActive) return;
+            landingElapsed = Mathf.Min(LandingSeconds, landingElapsed + Mathf.Max(0, seconds));
+            SetJumpStretch(flightStretch);
+        }
+        public void ResetJumpPose()
+        {
+            landingElapsed = LandingSeconds;
+            SetJumpStretch(1);
+        }
+
+        public void SetJumpStretch(float scale)
+        {
+            flightStretch = scale;
+            scale *= LandingScale(landingElapsed / LandingSeconds);
+            if (visualRoot == null || visualRoot == transform) return;
+            if (jumpRoot == null)
+            {
+                if (Mathf.Approximately(scale, 1)) return;
+                jumpRoot = new GameObject("Replacement jump stretch").transform;
+                jumpRoot.SetParent(visualRoot.parent, false);
+                visualRoot.SetParent(jumpRoot, false);
+                if (body != null && body.sprite != null)
+                    jumpBaseY = jumpRoot.InverseTransformPoint(body.transform.TransformPoint(
+                        new Vector3(0, body.sprite.bounds.min.y, 0))).y;
+            }
+            jumpRoot.localScale = new Vector3(1 / Mathf.Sqrt(scale), scale, 1);
+            jumpRoot.localPosition = Vector3.up * (jumpBaseY * (1 - scale));
+        }
+        private float beatBaseY;
         private GameplayMusicPlayer music;
         private PlayerMovement player;
         public float BeatScale => beatRoot != null ? beatRoot.localScale.x : 1;
 
         private void LateUpdate()
         {
+            TickLanding(Time.deltaTime);
             if (player == null) player = GetComponent<PlayerMovement>();
+            if (player != null && GetComponent<PlayerSlimeVisual>() == null)
+                gameObject.AddComponent<PlayerSlimeVisual>().Configure(this);
             if (music == null) music = player != null ? player.Music : GetComponentInParent<GameplayMusicPlayer>();
             if (music != null && music.InGameplayRun) RefreshBeat(music.BeatPosition, player != null);
             else ResetBeat();
@@ -45,12 +96,22 @@ namespace CandyCruisers
                 beatRoot = new GameObject("Beat pulse").transform;
                 beatRoot.SetParent(visualRoot.parent, false);
                 visualRoot.SetParent(beatRoot, false);
+                if (GetComponent<PlayerMovement>() != null && body != null && body.sprite != null)
+                    beatBaseY = beatRoot.InverseTransformPoint(body.transform.TransformPoint(
+                        new Vector3(0, body.sprite.bounds.min.y, 0))).y;
             }
-            beatRoot.localScale = Vector3.one * (1 + .09f * GameplayMusicPlayer.BeatPulse(beatPosition, offbeat));
+            float scale = 1 + .09f * GameplayMusicPlayer.BeatPulse(beatPosition, offbeat);
+            beatRoot.localScale = Vector3.one * scale;
+            beatRoot.localPosition = Vector3.up * (beatBaseY * (1 - scale));
         }
 
-        private void ResetBeat() { if (beatRoot != null) beatRoot.localScale = Vector3.one; }
-        private void OnDisable() => ResetBeat();
+        private void ResetBeat()
+        {
+            if (beatRoot == null) return;
+            beatRoot.localScale = Vector3.one;
+            beatRoot.localPosition = Vector3.zero;
+        }
+        private void OnDisable() { ResetBeat(); ResetJumpPose(); }
         public Bounds HitBounds
         {
             get

@@ -65,7 +65,7 @@ namespace CandyCruisers.Editor
             EventPresentationChecks.Run();
             GameOverPresentationChecks.Run();
             ColorClearCelebrationChecks.Run();
-            JackpotChecks.Run();
+            RewardWaveChecks.Run();
             PlayerColorAssistChecks.Run();
             ContactGameOverChecks.Run();
             PlayerDeathChecks.Run();

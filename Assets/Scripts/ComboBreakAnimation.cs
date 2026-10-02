@@ -5,20 +5,23 @@ namespace CandyCruisers
     public sealed class ComboBreakAnimation
     {
         public const float TravelSeconds = .28f;
+        public const float HoldSeconds = .3f;
         public const float DrainSeconds = .3f;
         public const float SlashSeconds = .12f;
         public const float SplitSeconds = .65f;
-        public const float Duration = TravelSeconds + DrainSeconds + SlashSeconds + SplitSeconds;
+        private const float SlashStart = TravelSeconds + HoldSeconds;
+        private const float SplitStart = SlashStart + SlashSeconds;
+        public const float Duration = SplitStart + SplitSeconds;
         public int Multiplier { get; private set; }
         public float Age { get; private set; }
         public Color SourceColor { get; private set; } = Color.white;
         public bool Active => Multiplier > 1 && Age < Duration;
-        public float DrainProgress => Mathf.Clamp01((Age - TravelSeconds) / DrainSeconds);
+        public float DrainProgress => Mathf.Clamp01((Age - SplitStart) / DrainSeconds);
         public Color Tint => Color.Lerp(SourceColor, Color.white, Mathf.SmoothStep(0, 1, DrainProgress));
-        public float SlashProgress => Mathf.Clamp01((Age - TravelSeconds - DrainSeconds) / SlashSeconds);
-        public float SlashOpacity => Active && Age >= TravelSeconds + DrainSeconds ?
-            1 - Mathf.Clamp01((Age - TravelSeconds - DrainSeconds - SlashSeconds) / .14f) : 0;
-        public float SplitProgress => Mathf.Clamp01((Age - TravelSeconds - DrainSeconds - SlashSeconds) / SplitSeconds);
+        public float SlashProgress => Mathf.Clamp01((Age - SlashStart) / SlashSeconds);
+        public float SlashOpacity => Active && Age >= SlashStart ?
+            1 - Mathf.Clamp01((Age - SplitStart) / .14f) : 0;
+        public float SplitProgress => Mathf.Clamp01((Age - SplitStart) / SplitSeconds);
         public float Opacity => Active ? 1 - SplitProgress * SplitProgress : 0;
 
         public void Begin(int multiplier, Color color) { Multiplier = multiplier; SourceColor = color; Age = 0; }
@@ -65,7 +68,7 @@ namespace CandyCruisers
             var tint = Tint;
             tint.a = opacity * Opacity;
             GUI.color = tint;
-            if (Age < TravelSeconds + DrainSeconds + SlashSeconds) GUI.Label(rect, text, style);
+            if (Age < SplitStart) GUI.Label(rect, text, style);
             else
             {
                 DrawHalf(rect, text, style, false);

@@ -6,8 +6,11 @@ namespace CandyCruisers
     // Presentation only: one impact envelope, with no camera shake or gameplay time changes.
     public sealed class FatalImpactBackdrop : MonoBehaviour
     {
-        public const float Duration = .62f;
+        public const float Duration = PlayerFatalDustBurst.Duration;
         public const int SortingOrder = GameOverBlackout.CoverOrder + 1;
+        private const int RingSegments = 160;
+        private static readonly float[] RingProfile = { -3, -1.3f, -.35f, 0, .35f, 1.3f, 3 };
+        private static readonly float[] RingOpacity = { 0, .12f, .65f, 1, .65f, .12f, 0 };
         private readonly List<Vector3> vertices = new List<Vector3>();
         private readonly List<Color> colors = new List<Color>();
         private readonly List<int> triangles = new List<int>();
@@ -44,7 +47,7 @@ namespace CandyCruisers
                 impact.particles[i] = particle;
                 impact.particleSizes[i] = EnemyPlaceholderArt.RandomDustSize();
             }
-            impact.mesh = new Mesh { name = "Fatal impact streaks and shards" };
+            impact.mesh = new Mesh { name = "Fatal tilted shockwave crests" };
             impact.mesh.MarkDynamic();
             root.GetComponent<MeshFilter>().sharedMesh = impact.mesh;
             impact.Present(0);
@@ -53,7 +56,7 @@ namespace CandyCruisers
 
         public void Present(float seconds)
         {
-            age = Mathf.Max(0, seconds);
+            age = seconds;
             Refresh();
         }
 
@@ -67,24 +70,16 @@ namespace CandyCruisers
             aspect = viewCamera.aspect;
             depth = viewCamera.nearClipPlane + 1;
             Vector2 center = viewCamera.WorldToViewportPoint(origin);
-            float launch = Mathf.Clamp01(age / PlayerDeathBurst.ShatterSeconds);
-            float fade = 1 - Mathf.SmoothStep(0, 1, (age - .18f) / (Duration - .18f));
-            float strength = (.6f + .4f * launch) * fade;
+            float flight = age - PlayerDeathBurst.ShatterSeconds;
+            float fade = 1 - Mathf.SmoothStep(0, 1, (age - 1.45f) / (Duration - 1.45f));
             vertices.Clear(); colors.Clear(); triangles.Clear();
-            // Short broken arcs stay close to the hit; no backdrop geometry should span the whole screen.
-            for (int arc = 0; arc < 3; arc++)
+            if (flight >= 0)
             {
-                float radius = .042f + arc * .019f + launch * .022f + age * .06f;
-                float start = .12f + arc * 2.1f;
-                Vector2 previous = center + Direction(start) * radius;
-                for (int segment = 1; segment <= 18; segment++)
-                {
-                    float t = segment / 18f;
-                    Vector2 point = center + Direction(start + t * 1.65f) * radius;
-                    float taper = Mathf.Sin(t * Mathf.PI);
-                    Stroke(previous, point, .0007f + .0014f * taper, new Color(1, 1, 1, strength * .8f));
-                    previous = point;
-                }
+                // The reference wave is a nearly edge-on, upright disc, not a horizontal belt.
+                float radius = .035f + flight * .8f + flight * flight * 1.1f;
+                DrawShockwave(center, radius, .003f + flight * .012f, fade);
+                if (flight > .025f)
+                    DrawShockwave(center, radius * .89f, .0015f + flight * .004f, fade * .48f);
             }
             DrawParticles(center, fade);
             mesh.Clear();
@@ -94,6 +89,39 @@ namespace CandyCruisers
         }
 
         private Vector2 Direction(float angle) => new Vector2(Mathf.Cos(angle) / aspect, Mathf.Sin(angle));
+
+        private void DrawShockwave(Vector2 center, float radius, float width, float opacity)
+        {
+            int first = vertices.Count;
+            float shortSide = Mathf.Min(1, aspect);
+            var rotation = Quaternion.Euler(0, 0, 8);
+            for (int segment = 0; segment <= RingSegments; segment++)
+            {
+                float angle = segment * Mathf.PI * 2 / RingSegments;
+                float cosine = Mathf.Cos(angle), sine = Mathf.Sin(angle);
+                float ripple = 1 + .0015f * Mathf.Sin(angle * 19 + age * 13) +
+                    .0008f * Mathf.Sin(angle * 37 - age * 9);
+                Vector2 point = rotation * new Vector3(cosine * .16f, sine, 0) * (radius * ripple);
+                Vector2 normal = rotation * new Vector3(cosine, sine * .16f, 0).normalized;
+                float nearSide = .5f - .5f * cosine;
+                for (int band = 0; band < RingProfile.Length; band++)
+                {
+                    Vector2 offset = (point + normal * (RingProfile[band] * width * Mathf.Lerp(.45f, 1.8f, nearSide))) * shortSide;
+                    offset.x /= aspect;
+                    vertices.Add(transform.InverseTransformPoint(viewCamera.ViewportToWorldPoint(
+                        new Vector3(center.x + offset.x, center.y + offset.y, depth))));
+                    colors.Add(new Color(1, 1, 1, opacity * Mathf.Lerp(.62f, 1, nearSide) * RingOpacity[band]));
+                }
+            }
+            for (int segment = 0; segment < RingSegments; segment++)
+            for (int band = 0; band < RingProfile.Length - 1; band++)
+            {
+                int a = first + segment * RingProfile.Length + band;
+                int b = a + RingProfile.Length;
+                triangles.Add(a); triangles.Add(b); triangles.Add(a + 1);
+                triangles.Add(a + 1); triangles.Add(b); triangles.Add(b + 1);
+            }
+        }
 
         private void DrawParticles(Vector2 center, float fade)
         {
@@ -105,7 +133,7 @@ namespace CandyCruisers
             {
                 float seed = Mathf.Repeat(shard * .618034f + colorIndex * .381966f, 1);
                 float angle = shard * Mathf.PI * 2 / 8 + colorIndex * .47f;
-                float distance = flight * (.65f + seed * .7f) * (1 - flight * .6f);
+                float distance = flight * (.55f + seed * .75f) / (1 + flight * 1.4f) * Mathf.Min(1, aspect);
                 Vector2 point = center + Direction(angle) * distance;
                 int index = colorIndex * 8 + shard;
                 var particle = particles[index];
@@ -123,26 +151,6 @@ namespace CandyCruisers
                 color.a = fade * Mathf.Lerp(.7f, 1, shimmer);
                 particle.color = color;
             }
-        }
-
-        private void Stroke(Vector2 start, Vector2 end, float width, Color color)
-        {
-            var delta = new Vector2((end.x - start.x) * aspect, end.y - start.y).normalized;
-            var side = new Vector2(-delta.y / aspect, delta.x) * width;
-            Triangle(start - side, end - side, end + side, color);
-            Triangle(start - side, end + side, start + side, color);
-        }
-
-        private void Triangle(Vector2 a, Vector2 b, Vector2 c, Color color)
-        {
-            Add(a, color); Add(b, color); Add(c, color);
-        }
-
-        private void Add(Vector2 point, Color color)
-        {
-            triangles.Add(vertices.Count);
-            vertices.Add(transform.InverseTransformPoint(viewCamera.ViewportToWorldPoint(new Vector3(point.x, point.y, depth))));
-            colors.Add(color);
         }
 
         private void OnDestroy()

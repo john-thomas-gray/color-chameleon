@@ -10,7 +10,7 @@ namespace CandyCruisers
         private static readonly float[] ChimeNotes = { 1f, 1.25f, 1.5f, 2f };
         public const float TongueFrequency = (float)SampleRate / TongueCycleSamples;
         public const float ShatterEchoSeconds = .18f;
-        public const float ShatterTailSeconds = 2.1f;
+        public const float ShatterTailSeconds = 2.8f;
 
         public static AudioClip Create(SoundEffect effect, int tonic = 0, int noteShift = 0)
         {
@@ -95,8 +95,8 @@ namespace CandyCruisers
                         int slot = i % delay;
                         float returned = line[slot];
                         damped = Mathf.Lerp(damped, returned, .55f);
-                        line[slot] = (i < dry.Length ? dry[i] : 0) + damped * .79f;
-                        wet[i] += returned * .19f;
+                        line[slot] = (i < dry.Length ? dry[i] : 0) + damped * .84f;
+                        wet[i] += returned * .21f;
                     }
                 }
                 // Distinct stereo repeats sit above the diffuse reflections.
@@ -110,7 +110,7 @@ namespace CandyCruisers
                 for (int i = 0; i < frames; i++)
                 {
                     float direct = i < dry.Length ? dry[i] : 0;
-                    float release = Mathf.Clamp01((frames - 1 - i) / (SampleRate * .12f));
+                    float release = Mathf.Clamp01((frames - 1 - i) / (SampleRate * .16f));
                     stereo[i * 2 + channel] = Mathf.Clamp(direct + wet[i], -.95f, .95f) * release;
                 }
             }

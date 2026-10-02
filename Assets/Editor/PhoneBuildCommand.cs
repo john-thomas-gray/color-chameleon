@@ -12,7 +12,7 @@ namespace CandyCruisers.Editor
         {
             string output = Environment.GetEnvironmentVariable("CANDY_CRUISERS_IOS_BUILD_PATH");
             if (string.IsNullOrWhiteSpace(output))
-                output = Path.Combine(Path.GetTempPath(), "candy-cruisers-ios-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss"));
+                output = Path.Combine(Path.GetTempPath(), "bass-invaders-ios-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss"));
 
             var scenes = EditorBuildSettings.scenes
                 .Where(scene => scene.enabled)

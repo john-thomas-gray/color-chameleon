@@ -120,7 +120,7 @@ namespace CandyCruisers.Editor
             foreach (var size in new[] { new Vector2(390, 844), new Vector2(960, 540), new Vector2(320, 320) })
             {
                 var resting = GameSession.ComboMultiplierRestRect(10, size.x - 74, 10, (int)size.y);
-                Check(resting.yMin >= 26 && resting.yMax < 10 + PlayerLifeIcons.ProgressOffset((int)size.y),
+                Check(resting.yMin >= 26 && resting.yMax <= 10 + PlayerLifeIcons.ProgressOffset((int)size.y),
                     "Compact multiplier clears the heading and progress bar");
                 var animation = new ComboBreakAnimation();
                 var originalColor = EnemyPalette.Get(EnemyColor.Blue);
@@ -134,18 +134,24 @@ namespace CandyCruisers.Editor
                     "Lost multiplier enlarges at screen center and fits portrait and landscape views");
                 Check(animation.SplitProgress == 0 && animation.Opacity == 1, "Number remains whole until it reaches the center");
                 Check(animation.Tint == originalColor, "Travel retains the original color until centerstage");
-                animation.Tick(ComboBreakAnimation.DrainSeconds / 2);
-                Check(animation.Tint.r > originalColor.r && animation.Tint.r < 1 && animation.Tint.b >= originalColor.b &&
+                animation.Tick(ComboBreakAnimation.HoldSeconds / 2);
+                Check(animation.Tint == originalColor && animation.DrainProgress == 0 &&
                     animation.SplitProgress == 0 && animation.SlashOpacity == 0 && animation.Opacity == 1,
-                    "Centerstage drains saturation toward white without fading, slashing or separating early");
-                animation.Tick(ComboBreakAnimation.DrainSeconds / 2);
-                Check(animation.Tint == Color.white && animation.SplitProgress == 0 && animation.Opacity == 1,
-                    "The whole combo is stark white before the slash");
+                    "Centerstage holds the last enemy color without draining, fading or separating early");
+                animation.Tick(ComboBreakAnimation.HoldSeconds / 2);
+                Check(animation.Tint == originalColor && animation.SplitProgress == 0 && animation.Opacity == 1,
+                    "The whole combo retains its color before the slash");
                 animation.Tick(ComboBreakAnimation.SlashSeconds / 2);
                 Check(animation.SlashProgress > 0 && animation.SlashProgress < 1 && animation.SlashOpacity == 1 &&
-                    animation.Tint == Color.white && animation.SplitProgress == 0,
-                    "A visible slash crosses the white number before the halves separate");
-                animation.Tick(ComboBreakAnimation.SlashSeconds / 2 + ComboBreakAnimation.SplitSeconds / 2);
+                    animation.Tint == originalColor && animation.DrainProgress == 0 && animation.SplitProgress == 0,
+                    "The slash crosses a fully colored number before the halves separate");
+                animation.Tick(ComboBreakAnimation.SlashSeconds / 2);
+                Check(animation.Tint == originalColor && animation.DrainProgress < .00001f,
+                    "Color drain has not advanced at the exact split boundary");
+                animation.Tick(ComboBreakAnimation.DrainSeconds / 2);
+                Check(animation.SplitProgress > 0 && animation.Tint.r > originalColor.r && animation.Tint.r < 1 &&
+                    animation.Tint.b >= originalColor.b, "Color drains only while the slashed halves are separating");
+                animation.Tick(ComboBreakAnimation.SplitSeconds / 2 - ComboBreakAnimation.DrainSeconds / 2);
                 Check(animation.HalfOffset(center.height, false).x < 0 && animation.HalfOffset(center.height, true).x > 0 &&
                     animation.Opacity > 0 && animation.Opacity < 1 && animation.Tint == Color.white && animation.SlashOpacity == 0,
                     "White halves separate and fade after the slash");
@@ -178,7 +184,7 @@ namespace CandyCruisers.Editor
             coarse.Tick(.75f);
             for (int i = 0; i < 75; i++) fine.Tick(.01f);
             Check(Mathf.Abs(coarse.SplitProgress - fine.SplitProgress) < .0001f && coarse.Tint == fine.Tint,
-                "Travel, drain and slash timing is stable across long and short frames");
+                "Travel, slash and post-split drain timing is stable across long and short frames");
         }
 
         private static void CheckComboDeathFade()

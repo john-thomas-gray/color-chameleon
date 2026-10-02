@@ -8,6 +8,10 @@ namespace CandyCruisers
         private SpriteRenderer body;
         private SpriteRenderer imitation;
         private LineRenderer tendril, portal, streak;
+        private LineRenderer[] dashLines, feedingTendrils;
+        private float dashRemaining;
+        private int dashDirection;
+        private bool feedingImitation;
         private float phaseRemaining, shiftRemaining, clock;
         private EnemyColor phaseColor;
         private bool warpArrival;
@@ -51,6 +55,18 @@ namespace CandyCruisers
             if (greenSpinRemaining <= 0) greenRestingRotation = body.transform.localRotation;
             greenSpinRemaining = GreenSpinSeconds;
         }
+        public void DashGreen(int direction)
+        {
+            SpinGreen();
+            dashDirection = direction < 0 ? -1 : 1;
+            dashRemaining = .42f;
+            if (dashLines != null) return;
+            dashLines = new LineRenderer[5];
+            for (int i = 0; i < dashLines.Length; i++)
+                dashLines[i] = Line("Green dash trail " + i, 3, .035f);
+        }
+        public void SetDashDirection(float distance)
+        { if (Mathf.Abs(distance) > .000001f) dashDirection = distance < 0 ? -1 : 1; }
         public void AimRed(Vector3 direction, bool aiming, float seconds, bool firing = false)
         {
             if (body == null || !aiming && !aimingApplied) return;
@@ -66,17 +82,20 @@ namespace CandyCruisers
         public void BeginImitation(GridEnemy neighbor, Sprite previousSprite, bool linked = true)
         {
             linkedImitation = linked;
+            feedingImitation = !linked;
             target = neighbor;
             targetPosition = neighbor.transform.position;
             oldSprite = previousSprite;
             imitationRemaining = EnemyAbilities.ImitationSeconds;
             imitationColor = neighbor.Color;
             body.sprite = neighbor.Visuals.Body.sprite;
+            if (feedingImitation) EnsureFeedingTendrils();
         }
         public void DetachImitation()
         {
             linkedImitation = false;
-            target = null;
+            feedingImitation = imitationRemaining > 0;
+            if (feedingImitation) EnsureFeedingTendrils();
             if (tendril != null) tendril.enabled = false;
         }
         public void RevealDisguise() => revealRemaining = .5f;
@@ -135,6 +154,8 @@ namespace CandyCruisers
             imitationRemaining = Mathf.Max(0, imitationRemaining - seconds);
             revealRemaining = Mathf.Max(0, revealRemaining - seconds);
             movementPulseRemaining = Mathf.Max(0, movementPulseRemaining - seconds);
+            dashRemaining = Mathf.Max(0, dashRemaining - seconds);
+            PresentDash();
             float assimilation = 1 - imitationRemaining / EnemyAbilities.ImitationSeconds;
             Color tint = EnemyPalette.Get(color);
             Color brilliant = color == EnemyColor.Purple ? new Color(1, .3f, 1) :
@@ -202,6 +223,73 @@ namespace CandyCruisers
             if (revealRemaining > 0)
                 body.color = Color.Lerp(EnemyPalette.Get(EnemyColor.Yellow), Color.white,
                     .5f + .5f * Mathf.Cos((.5f - revealRemaining) * Mathf.PI * 12));
+            PresentFeedingTendrils(assimilation);
+        }
+        private void PresentDash()
+        {
+            if (dashLines == null) return;
+            float fade = Mathf.Clamp01(dashRemaining / .42f);
+            for (int i = 0; i < dashLines.Length; i++)
+            {
+                var line = dashLines[i];
+                line.enabled = dashRemaining > 0;
+                if (!line.enabled) continue;
+                float length = .3f + (i % 3) * .12f;
+                var head = body.bounds.center + new Vector3(-dashDirection * .12f, (i - 2) * .09f);
+                line.startColor = new Color(.8f, 1, .7f, fade);
+                line.endColor = new Color(.25f, 1, .45f, 0);
+                line.startWidth = .035f * fade; line.endWidth = .008f * fade;
+                for (int j = 0; j < 3; j++)
+                    line.SetPosition(j, head + Vector3.left * dashDirection * (length + (1 - fade) * .16f) * j / 2);
+            }
+        }
+
+        private void EnsureFeedingTendrils()
+        {
+            if (feedingTendrils != null) return;
+            feedingTendrils = new LineRenderer[5];
+            for (int i = 0; i < feedingTendrils.Length; i++)
+                feedingTendrils[i] = Line("Disguise feeding tendril " + i, 25, .04f);
+        }
+
+        private void PresentFeedingTendrils(float progress)
+        {
+            if (feedingTendrils == null) return;
+            bool active = feedingImitation && imitationRemaining > 0;
+            if (target != null && target.isActiveAndEnabled) targetPosition = target.transform.position;
+            var delta = targetPosition - transform.position;
+            var side = Vector3.Cross(delta.normalized, Vector3.forward);
+            float reach = Mathf.SmoothStep(0, 1, Mathf.Clamp01(progress / .2f));
+            float fade = Mathf.Clamp01((1 - progress) / .16f);
+            var yellow = EnemyPalette.Get(EnemyColor.Yellow);
+            var food = EnemyPalette.Get(imitationColor);
+            for (int arm = 0; arm < feedingTendrils.Length; arm++)
+            {
+                var line = feedingTendrils[arm];
+                line.enabled = active;
+                if (!active) continue;
+                // Traveling colored bulges run from the neighbor back into the Yellow.
+                var colors = new GradientColorKey[8];
+                var widths = new Keyframe[8];
+                for (int k = 0; k < 8; k++)
+                {
+                    float t = k / 7f;
+                    float gulp = Mathf.Pow(.5f + .5f * Mathf.Sin(t * 15 + progress * 30 + arm * 1.7f), 4);
+                    colors[k] = new GradientColorKey(Color.Lerp(yellow, food, gulp * reach), t);
+                    widths[k] = new Keyframe(t, (.018f + .035f * gulp) * fade);
+                }
+                var gradient = new Gradient();
+                gradient.SetKeys(colors, new[] { new GradientAlphaKey(fade, 0), new GradientAlphaKey(fade, 1) });
+                line.colorGradient = gradient;
+                line.widthCurve = new AnimationCurve(widths); line.widthMultiplier = 1;
+                for (int i = 0; i < line.positionCount; i++)
+                {
+                    float t = (float)i / (line.positionCount - 1);
+                    float curl = Mathf.Sin(t * Mathf.PI) * ((arm - 2) * .13f +
+                        .065f * Mathf.Sin(t * 12 + clock * 5 + arm * 2));
+                    line.SetPosition(i, transform.position + delta * t * reach + side * curl * reach);
+                }
+            }
         }
         private void EnsureSurge()
         {
@@ -267,11 +355,14 @@ namespace CandyCruisers
             greenSpinRemaining = 0;
             if (aimingApplied && body != null) body.transform.localRotation = restingRotation;
             aimingApplied = false;
-            phaseRemaining = shiftRemaining = imitationRemaining = revealRemaining = movementPulseRemaining = 0;
+            phaseRemaining = shiftRemaining = imitationRemaining = revealRemaining = movementPulseRemaining = dashRemaining = 0;
+            feedingImitation = false;
             linkedImitation = false;
             target = null;
             if (tendril == null) return;
             tendril.enabled = portal.enabled = streak.enabled = imitation.enabled = false;
+            if (dashLines != null) foreach (var line in dashLines) line.enabled = false;
+            if (feedingTendrils != null) foreach (var line in feedingTendrils) line.enabled = false;
             if (surgeGlow != null)
                 for (int i = 0; i < surgeGlow.Length; i++) surgeGlow[i].enabled = surgeCore[i].enabled = false;
         }

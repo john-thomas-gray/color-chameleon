@@ -1,9 +1,69 @@
 # Menus And Pause
 
-The gameplay scene opens on the main menu over a solid black background. Play
-or Enter starts the normal empty opening and phased-in fleet. No enemies,
-missiles or player actions run behind the main menu. The menu also shows the
-local top-five leaderboard when scores have been recorded.
+The gameplay scene opens on a black, title-only main menu. BASS INVADERS pulses
+to the playing soundtrack. On arrival, the complete title descends from above
+the screen, traverses back and forth and drops at its turns like the fleet.
+It starts above the right edge, drops, sweeps to the left edge, drops, sweeps to
+the right edge, then drops to its final height before sliding horizontally to
+center. Every direction change has a vertical drop between horizontal sweeps.
+The title waits until the first menu beat, then each vertical and horizontal leg
+starts and ends on the menu song's 140-beats-per-minute grid.
+Once it reaches its usual position, the subtitle tilts up from a flat baseline
+and its light sweeps upward. The colored slime then arrives by one randomly
+chosen entrance: a flip from the right, a flight and skid from the left followed
+by a pivot and counterclockwise flip, or a descent in a white conical tractor
+beam with traveling rings. The beam is wider than the entire character during
+descent and draws over him, so he appears inside it. On landing it fans shut
+to a bright narrow line, then retracts upward into space. All three land at the
+original perch, at normal gameplay size.
+`MenuIntroAnimation` owns these paths and stage durations; the title keeps its
+live soundtrack pulse throughout. Tap or click anywhere, or
+press Enter or Space, to fade the title and float the slime down to its gameplay position
+over 1.2 seconds. The opening fleet starts afterward; input and enemy activity
+remain locked throughout the arrival. Repeated taps do not restart it. THE
+RHYTHM IS OUT THERE sits beneath the title, changes color on the beat, and fades
+with it on arrival. No buttons, previews or leaderboard are displayed.
+The soundtrack continues uninterrupted through the arrival. During the intro,
+a tap, click, Space or Enter skips directly to the settled menu without starting
+gameplay. The next activation starts the normal departure. Once the intro has
+finished naturally, the first activation starts gameplay as usual.
+On the first launch, the tractor-beam version is mandatory and all skip/start
+inputs are consumed until its beam has zipped away. Completion is saved under
+`CandyCruisers.MenuIntro.Seen`; quitting early leaves it unseen. Subsequent
+launches choose randomly and allow skipping. Animation Preview does not read
+or change the first-launch restriction or completion flag.
+
+The solid-colored subtitle glows as one continuous light source. The perched
+slime's body uses the subtitle's current saturated palette color, changing
+directly to the next color on each beat without following the subtitle's white
+pulse brightening; its eyes and pupils retain their authored colors.
+The subtitle has a fine
+white outline and a softer, wider local glow to keep its faces readable against
+the light. The main title is opaque white and the slime keeps its normal menu
+artwork; both block the light
+and cast projected shadows without being darkened. Light escapes around and
+through gaps in the actual letter and sprite silhouettes, not prearranged rays.
+The light is treated as behind the artwork: enclosed letter counters such as
+the opening in R transmit light even when a lower stroke lies beneath them.
+The shadow shader integrates transmission rather than stopping at the first
+stroke. The lower outer edges rise at 15 degrees from the subtitle's outermost
+bottom ink corners, measured from font glyphs rather than the text layout box.
+Adjust `MenuBacklight.LowerEdgeAngle` to change this angle.
+The light follows the subtitle's beat color, breathes with the soundtrack, and
+fades with the menu. It does not appear in gameplay or pause menus.
+`MenuBacklight` draws the current font and sprite silhouettes into a reusable
+offscreen texture. `Assets/Resources/MenuLight.shader` controls source width,
+falloff and shadow contrast; `MenuBacklight.Intensity` controls the beat response.
+`GameSession.DrawMinimalMainMenu` controls the subtitle glow. The shadow follows
+the title pulse and departing slime. Render textures resize with the window and
+are released with the session.
+
+`GameSession.MenuArrivalSeconds` controls the descent duration;
+`MinimalTitleRect` controls the title position and beat expansion.
+`PlayerSlimeVisual` owns the replaceable flat-bottom body and upper-body jelly
+wobble. The bottom row remains fixed, deformation increases toward the top,
+and the eyes follow the wobble. The player beat pulse is anchored at the feet.
+These visual changes do not resize collision bounds.
 
 Use P, Escape or the pause button in the upper-right playfield header to pause.
 P, Escape or Resume continues the same run. Losing focus or backgrounding the
@@ -12,10 +72,10 @@ The pause menu also offers Restart and Main Menu. Game over shows only a white
 GAME OVER title above screen center; the final score is still saved to the local leaderboard.
 R restarts a current run.
 
-Buttons show their hotkeys in parentheses: Play (Enter), Resume (P / Enter),
+Pause buttons show their hotkeys in parentheses: Resume (P / Enter),
 Restart (R), and Main Menu (M). After GAME OVER fades in, Enter also restarts.
-Left and Right adjust the main menu's starting level, with shortcuts shown on
-the minus and plus buttons. Typing one or two number keys directly enters the
+Left and Right still adjust the main menu's starting level as hidden testing
+shortcuts. Typing one or two number keys directly enters the
 starting level, capped at 99. Numeric-keypad Enter works wherever Enter does.
 Main Menu and level-selection keys are active only in their corresponding menus;
 Escape remains an alternate pause/resume shortcut.
@@ -29,26 +89,26 @@ the intact player stays visible above the blackout and glides to centerstage thr
 The fade keeps its original four-beat duration even as the music slows; music is fully
 stopped at blackout, leaving the subsequent shatter at its normal speed and volume.
 Only after the fade completes does the game-over death cue begin, replacing
-the player with a hot multicolored dust burst and a flat expanding shock ring.
-Its backdrop adds small white curved shockwaves close to the player, without pointed spikes.
-At the fracture, colored shards from every enemy color unlocked at the current
-run level disperse outward from the hit, even if that color is absent from the
-fleet. The shards spin and fade beneath the player's death animation. The foreground
-dust ring outruns the core cloud in a thin horizontal band. The backdrop starts
-after the four-beat fade, peaks 0.14 seconds into the death animation at the fracture,
-and fades fully back to black by 0.62 seconds, before the title appears. Its origin follows the centered
+the player with a multicolored powder explosion inspired by the Death Star reference.
+At the 0.14-second fracture, a narrow, nearly vertical shockwave disc tilts eight degrees
+and expands beyond the frame. Its bright white crest has soft edges and a close trailing
+ripple; the near edge broadens as it passes. A dense spray of 960 soft dust grains uses
+every enemy color unlocked at the current run level, even if absent from the fleet.
+The uneven radial spray continues spreading and grows with perspective, without spark
+streaks or a fiery plume. Both dust and shockwaves clear to black at 2.4 seconds.
+The origin follows the centered
 player-death artwork and its geometry adapts to portrait, landscape and the rim crunch;
 it never changes gameplay time, camera framing or hitboxes.
-A glass-shattering sound starts at the same 0.14-second marker as the player's
-first fragments, with stereo echoes and a 2.1-second reverberant tail. The old descending
+A glass-shattering sound starts at 0.08 seconds, just ahead of the player's
+0.14-second first-fragment marker, with stereo echoes and a 2.8-second reverberant tail. The old descending
 game-over cadence no longer plays. Ordinary recoverable deaths do not black
 out the scene or stop the soundtrack.
-Score submission waits for the fade and then the full death cue (another 0.9 seconds for the
+Score submission waits for the fade and then the full death cue (another 2.4 seconds for the
 placeholder). Once the death cue finishes, white GAME OVER text above screen center fades in
 over 0.65 seconds against the black screen, using the same Bungee font as the main
 title. No panel, score, leaderboard or buttons are drawn. Input remains blocked
 until the text is fully visible; then a tap or click returns to the main menu,
-Enter or R restarts, and M returns to the main menu. The transition uses unscaled
+Enter or R restarts, and Space or M returns to the main menu. The transition uses unscaled
 time; pause cannot obscure or stall it.
 
 Pause is separate from the underlying Playing/Refilling state. It freezes

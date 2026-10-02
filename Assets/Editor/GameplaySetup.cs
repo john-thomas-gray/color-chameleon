@@ -42,7 +42,11 @@ namespace CandyCruisers.Editor
             grid.transform.position = new Vector3(0, 3f, 0);
 
             PlayerSettings.companyName = "John Gray";
-            PlayerSettings.productName = "Candy Cruisers";
+            PlayerSettings.productName = "Bass Invaders";
+            PlayerSettings.bundleVersion = "1.0";
+            PlayerSettings.SetApplicationIdentifier(BuildTargetGroup.Standalone, "com.johngray.bassinvaders");
+            PlayerSettings.SetApplicationIdentifier(BuildTargetGroup.iOS, "com.johngray.bassinvaders");
+            PlayerSettings.iOS.buildNumber = "1";
             PlayerSettings.defaultScreenWidth = 540;
             PlayerSettings.defaultScreenHeight = 960;
             PlayerSettings.defaultInterfaceOrientation = UIOrientation.Portrait;

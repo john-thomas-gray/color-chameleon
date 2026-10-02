@@ -5,6 +5,11 @@ namespace CandyCruisers.Editor
 {
     public static class PlayfieldFrameChecks
     {
+        public static void RunColorChecks()
+        {
+            CheckMagicFrame();
+            CheckReturnPreview();
+        }
         public static void Run()
         {
             var frame = GameObject.Find("Playfield Border").GetComponent<PlayfieldFrame>();
@@ -33,6 +38,7 @@ namespace CandyCruisers.Editor
             }
             finally { body.color = original; frame.Refresh(); }
             CheckMagicFrame();
+            CheckReturnPreview();
             CheckPlayerClip(frame);
             Debug.Log("Playfield frame checks passed: geometry, player colors, earned-color magic flashes, increasing speed and player clipping at every rim edge.");
         }
@@ -206,6 +212,36 @@ namespace CandyCruisers.Editor
                     frame.Refresh(.1f); CheckTint(frame, player.DisplayColor);
                 }
                 finally { UnityEngine.Object.DestroyImmediate(root); }
+            });
+        }
+        private static void CheckReturnPreview()
+        {
+            SpecialEnemyChecks.Fixture((grid, player, tongue) =>
+            {
+                var frameRoot = new GameObject("Return preview frame", typeof(LineRenderer), typeof(PlayfieldFrame));
+                try
+                {
+                    ProgressionChecks.Add(grid, EnemyColor.Blue, 0, 0);
+                    typeof(PlayerMovement).GetProperty("ReadyColor").SetValue(player, EnemyColor.Red);
+                    player.RefreshPresentation(0);
+                    var session = grid.gameObject.AddComponent<GameSession>();
+                    session.Configure(player);
+                    var frame = frameRoot.GetComponent<PlayfieldFrame>();
+                    frame.Configure(player);
+                    Check(player.ReturnColorPreview == null && session.ProgressBarColor == player.DisplayColor,
+                        "Border and progress start on the player's current color");
+                    Check(tongue.TryFire(EnemyColor.Red, 1), "Preview fixture starts a return shot");
+                    tongue.Tick(1f / 14f, grid);
+                    Check(tongue.Retracting && player.ReturnColorPreview == EnemyColor.Blue,
+                        "Retraction prepares the next reachable player color");
+                    var expected = EnemyPalette.Get(EnemyColor.Blue);
+                    Check(session.ProgressBarColor == expected && player.AccentColor == expected,
+                        "Progress bar follows the prepared return color immediately");
+                    frame.Refresh(.1f); CheckTint(frame, expected);
+                    frame.RefreshBeat(0); CheckTint(frame, expected);
+                    frame.RefreshBeat(.75f); CheckTint(frame, expected);
+                }
+                finally { UnityEngine.Object.DestroyImmediate(frameRoot); }
             });
         }
         private static void CheckTint(PlayfieldFrame frame, Color expected)

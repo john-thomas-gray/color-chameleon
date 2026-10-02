@@ -6,6 +6,7 @@ namespace CandyCruisers
     public sealed class PlayerDeathBurst : MonoBehaviour
     {
         public const float Duration = .9f;
+        public const float ShatterSoundSeconds = .08f;
         public const float ShatterSeconds = .14f;
         private SpriteRenderer[] pieces;
         private Vector3[] origins, scales;

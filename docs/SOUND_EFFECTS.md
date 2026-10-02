@@ -69,7 +69,10 @@ then gameplay shuffles the remaining recordings. The playlist contains Another
 Joe, Potential For Anything, Disco Descent, the original GameplayMusic track,
 Skanska, The Third Kind, Down To Earth Part 1, Until I Collapse, War On Activism,
 Intergalactic Emotional Breakdown, Shooting Robots in Space, Vertex Stage 1, and
-the developer counting metronome. The carried menu song counts as the first entry
+the 55.380-288.206-second gameplay edit of Contact, plus the developer counting
+metronome. Contact's edit begins and ends on analyzed transition beats, with a
+five-millisecond input and 20-millisecond output ramp preventing cut clicks. The
+carried menu song counts as the first entry
 in the shuffle bag. Each song finishes before the next
 begins. Every shuffle bag includes each song once and avoids an immediate repeat
 at its boundary.
@@ -81,8 +84,8 @@ override takes over only after the carried menu song finishes.
 Fatal death stops the current track immediately, before the death animation
 advances. The scene fades to black over the duration of the next two mapped beats,
 captured before playback stops, while the intact player stays visible and moves to centerstage. Only then does the game-over death
-animation start. `PlayerShatter` starts once at `PlayerDeathBurst.ShatterSeconds`
-(0.14 seconds into that animation, after the fade), the same marker that releases the fragments. There is no later
+animation start. `PlayerShatter` starts once at `PlayerDeathBurst.ShatterSoundSeconds`
+(0.08 seconds into that animation, after the fade), just ahead of the marker that releases the fragments. There is no later
 game-over cadence or music fade. Recoverable deaths leave music unchanged.
 Pause keeps the song position and resumes from there. Supplied soundtrack
 recordings can use any Unity-supported local audio format.
@@ -103,6 +106,8 @@ requires regenerating its map; the loader rejects mismatched recording lengths.
 
 Maps for We Are Not Anonymous, Poison Was the Cure, and Drive Slow are retained,
 but those recordings are no longer in the playlist.
+Contact uses a generated low-frequency onset map for its 232.826-second edit;
+its first detected beat is the downbeat.
 Restoring a recording and its soundtrack entry enables its matching map again.
 These are machine estimates: syncopation, sparse introductions, fills and fading
 outros can still produce misplaced or half/double-time beats.
@@ -140,26 +145,25 @@ The border, magic colors, and repeating enemy
 warning flashes follow the current audio sample clock. Gameplay cooldowns remain
 unchanged. While enemies are present, the border alternates white and the current
 player display color, independently of earned bars. Outside a live wave it stays
-white unless a clear transition is active. Fleet arrivals crunch the rim and all
-world-space gameplay visuals inward together, then release them over 0.8 seconds.
-At the midpoint, the view is compressed by twelve percent and the boundary,
-outline and corners reach three times their normal visible thickness. Size and
-thickness return smoothly to normal without an added brightness flash. This is a
-camera presentation effect: actor positions, collision bounds, wrap limits and
-gameplay camera dimensions stay fixed, pointer projection follows the view, and
-the compression has no sound cue. Enemies
+white unless a clear transition is active. Fleet arrivals leave the camera
+projection, rim position and rim thickness unchanged; the inward compression
+animation has been removed. Border color flashes are unchanged. Enemies
 pulse on the musical downbeat and the player on the opposite half-beat. A separate
 visual pivot keeps this motion independent of spawn growth, disguises and hitboxes.
 Clear transitions stretch from the fleet clear toward the next eligible
-current-track downbeat. The final regular bar removal lands one beat before the
-spawn downbeat; earned-life clears reserve two beats so the life pulse can occupy
-the intervening beat. The available bar span is divided evenly across the earned
-bars. Each slot starts white, flashes that bar's color for the second half, and
-removes the bar at the slot boundary. The last bar is reserved for the final
-flash. The transition ends on that color, which becomes the player's color as
-the new fleet appears. Partial sets play the replaceable `BarPowerDown` cue
-exactly when each earned bar disappears, descending two semitones per bar.
-Complete sets retain their jackpot celebration and play `BarPowerUp` at each
+current-track downbeat. Partial sets spike every earned bar at once, keep the
+player flash white, and power all earned bars down together until the spawn
+downbeat. During that wind-down the bars stop beat-pulsing, lose their glow, and
+settle back to their default unpowered color. They play one replaceable `BarPowerDown` cue stretched to
+that whole power-down span. Complete sets still reserve the final regular bar removal one
+beat before the spawn downbeat; earned-life clears retain two reserved beats.
+The new spare enters from offscreen, launches at the final bar spike, and flies
+to the life row over two musical beats. The complete-set bar span is divided
+evenly across the earned bars. Each slot starts white, flashes that bar's color
+for the second half, and removes the bar at the slot boundary. The last bar is
+reserved for the final flash. The transition ends on that color, which becomes
+the player's color as the new fleet appears. Complete sets retain their jackpot
+celebration and play `BarPowerUp` at each
 removal, ascending along the major scale. Each power-up cue sweeps upward in
 pitch; both cues can be replaced independently in the sound settings.
 Tongue return
@@ -245,10 +249,10 @@ long chains inside the audio engine's pitch range without clamping to an out-of-
 Small-chain pops stay at base pitch. Wave audio fires once per batch, and one-up audio only when
 a life is actually granted.
 
-`PlayerShatter` plays once when the fatal player's fragments appear, not after
-the animation ends. Its generated fallback preserves the 0.7-second dry crack
+`PlayerShatter` plays once just before the fatal player's fragments appear, not
+after the animation ends. Its generated fallback preserves the 0.7-second dry crack
 and glass-like ringing, then adds distinct left/right echoes at 0.18/0.215 seconds
-and damped room reflections, with a 2.1-second total stereo tail. Effects are
+and damped room reflections, with a 2.8-second total stereo tail. Effects are
 baked into this cue only, so pooled voices never carry reverb into unrelated
 sounds. It supports clip replacement, per-cue volume, pause and master mute.
 During the preceding four-beat blackout, the current music recording slows continuously

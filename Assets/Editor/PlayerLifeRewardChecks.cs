@@ -8,134 +8,129 @@ namespace CandyCruisers.Editor
     {
         public static void Run()
         {
-            CheckReservations();
-            foreach (bool fullSet in new[] { false, true })
-            foreach (bool room in new[] { false, true })
-            foreach (bool longFrame in new[] { false, true })
-                CheckSilentSequence(fullSet, room, longFrame);
-            if (Application.isPlaying)
-                foreach (bool mapped in new[] { false, true })
-                foreach (bool lateFrame in new[] { false, true })
-                foreach (bool counting in new[] { false, true })
-                    CheckMusicSequence(mapped, lateFrame, counting);
-            Debug.Log("Life reward checks passed: post-bar appearance/pulse, following-beat flight and downbeat spawn, cap, partial sets, pause and missed frames.");
+            CheckTrajectory(); CheckCancellation();
+            foreach (bool full in new[] { false, true })
+            foreach (bool room in new[] { false, true }) CheckSession(full, room);
+            if (Application.isPlaying) CheckMusicClock();
+            Debug.Log("Life reward checks passed: offscreen entrance, final-spike launch, slot arrival, full-cap flip, partial sets, queues, cancellation and soundtrack clock.");
         }
 
-        private static void CheckReservations()
+        private static void CheckTrajectory()
+        {
+            foreach (var screen in new[] { new Vector2(390, 844), new Vector2(960, 540) })
+            foreach (bool overlap in new[] { false, true })
+            {
+                var gain = new PlayerLifeGainAnimation();
+                gain.Begin(1, launchDelay: 1, barIndex: 2, barCount: 3, overlappingWave: overlap);
+                var resting = PlayerLifeIcons.IconRect(PlayerLifeIcons.RowRect(12, 0, (int)screen.y), 1);
+                var bars = new Rect(20, screen.y - 20, screen.x - 40, 5);
+                var size = new Vector2(40, 32);
+                gain.Tick(gain.EnterAt);
+                var stage = PlayerLifeGainAnimation.StageClip(bars, screen.y);
+                var entrance = gain.DisplayRect(resting, bars, size, screen.x);
+                Check(gain.Visible && entrance.xMin >= stage.xMax && entrance.xMin < stage.xMax + size.x,
+                    "New slime begins hidden immediately behind the border");
+                gain.Tick(gain.LaunchAt - gain.Age);
+                var contact = gain.DisplayRect(resting, bars, size, screen.x);
+                var bar = GameSession.ColorClearBarSlotRect(bars.x, bars.y, bars.width, 3, 2);
+                Check(bar.Contains(new Vector2(contact.center.x, bar.center.y)) && entrance.center.x - contact.center.x < size.x * 2,
+                    "Reward takes a short step onto the near edge of the final bar");
+                Near(contact.yMax, bar.yMax - bar.height * FullSetCelebration.WaveScale(FullSetCelebration.SpikePhase, overlap),
+                    "Feet touch the rising bar for both single-bar and overlapping waves, independent of the display slot");
+                gain.Tick((gain.FinishAt - gain.Age) / 2);
+                Check(gain.DisplayRect(resting, bars, size, screen.x).center.y < contact.center.y,
+                    "Final spike launches the new life upward");
+                Check(gain.Rotation < -180 && gain.Rotation > -360, "Incoming life flips on its upward flight");
+                gain.Tick((gain.FinishAt - gain.Age) * .8f);
+                Check(gain.DisplayRect(resting, bars, size, screen.x).center.y < resting.center.y,
+                    "Incoming life clears the tally ledge before descending onto it");
+                gain.Tick(100);
+                Check(!gain.Active && Vector2.Distance(gain.DisplayRect(resting, bars, size, screen.x).center, resting.center) < .001f,
+                    "Reward lands exactly in the life tally");
+            }
+        }
+
+        private static void CheckCancellation()
         {
             var icons = new PlayerLifeIcons();
-            icons.ReserveGain(1); icons.Tick(100);
-            Check(icons.IsGainPending(1) && !icons.Gain.Active,
-                "An earned icon stays hidden throughout any length bar celebration");
-            icons.ReleaseGain(1); icons.Tick(FullSetCelebration.StepDuration * 1.5f);
-            Check(icons.Gain.Visible && icons.Gain.PulseScale > 1.19f,
-                "Releasing the reward starts appearance and pulse on the same next beat");
-            icons.Reset(); icons.ReserveGain(1); icons.BeginLoss(1); icons.ReleaseGain(1); icons.Tick(100);
-            Check(!icons.Animating, "A reserved but spent life cannot reappear after death");
-            icons.ReserveGain(0); icons.BeginLoss(1); icons.ReleaseGain(0); icons.Tick(100);
-            Check(icons.Gain.Active && icons.Gain.Slot == 0, "A still-owned reward waits for an active loss to finish");
-            icons.Reset(); icons.ReserveGain(1); icons.Reset(); icons.ReleaseGain(1);
-            Check(!icons.Animating, "Restart clears every pending reward");
+            icons.ScheduleWaveGain(1, null, 2, 1, 2); icons.BeginLoss(1);
+            Check(!icons.Gain.Active, "An earned life spent before arrival cannot reappear");
+            icons.Reset(); icons.ScheduleWaveGain(0, null, 2, 1, 2); icons.BeginLoss(1);
+            Check(icons.Gain.Active, "Losing a different spare does not erase a still-owned incoming life");
+            icons.Reset(); icons.BeginLoss(0); icons.BeginGain(0); icons.Tick(2); icons.Tick(3);
+            Check(!icons.Animating, "A direct gain queued during loss eventually arrives");
+            icons.ScheduleWaveGain(0, null, 2, 0, 1); icons.Reset();
+            Check(!icons.Animating, "Restart clears gain, loss and reservations");
         }
 
-        private static void CheckSilentSequence(bool fullSet, bool room, bool longFrame)
+        private static void CheckSession(bool full, bool room)
         {
             SpecialEnemyChecks.Fixture((grid, player, tongue) =>
             {
                 var session = Session(grid, player);
-                var music = player.Music;
-                music.StopPlayback();
+                player.Music.StopPlayback();
                 if (room) { player.Hit(); player.TickSurvival(4); }
                 int lives = player.Lives, arrivals = 0;
-                bool rewarded = fullSet && room;
                 session.WaveSpawned += () => arrivals++;
-                ClearBars(grid, fullSet);
-                var gain = player.LifeIcons.Gain;
-                float beat = music.BeatDuration, duration = session.ClearCelebration.PlaybackDuration;
-                Check(player.Lives == lives + (rewarded ? 1 : 0) && !gain.Active &&
-                    player.LifeIcons.IsGainPending(player.ExtraLives - 1) == rewarded,
-                    "Only an actual life reward reserves an icon; nothing appears while bars power down");
-                player.TickSurvival(duration + 100);
-                session.Tick(duration - .001f);
-                Check(!gain.Active && arrivals == 0, "A long player frame cannot show the reward before all bars finish");
-                session.Tick(longFrame ? 100 : .002f);
-                Check(gain.Active == rewarded && !gain.Visible && arrivals == 0,
-                    "The final power-down frame is empty even after a long frame");
-                session.Pause(); session.Tick(10); player.TickSurvival(10);
-                Check(gain.Age == 0 && arrivals == 0, "Pause holds both the reward and the post-bar spawn delay");
-                session.Resume(); music.StopPlayback();
-                session.Tick(beat - .001f); player.TickSurvival(beat - .001f);
-                Check(!gain.Visible && arrivals == 0, "The first post-bar beat has not started early");
-                session.Tick(.002f); player.TickSurvival(.002f);
-                Check(rewarded ? gain.Visible && arrivals == 0 : !gain.Active && arrivals == 1,
-                    "The next beat shows a rewarded life; capped and partial clears spawn on their original beat");
+                Clear(grid, full);
+                bool rewarded = full && room;
+                Check(player.Lives == lives + (rewarded ? 1 : 0) && player.LifeIcons.Gain.Active == rewarded,
+                    "Only a full set with room earns and schedules an incoming life");
+                float spike = session.ClearCelebration.FinalSpikeTime;
                 if (rewarded)
                 {
-                    session.Tick(beat / 2); player.TickSurvival(beat / 2);
-                    Check(gain.PulseScale > 1.19f && gain.TravelProgress == 0 && arrivals == 0,
-                        "Appearance and pulse occupy one beat while the field remains empty");
-                    session.Tick(beat / 2); player.TickSurvival(beat / 2);
-                    Check(arrivals == 1 && gain.TravelProgress > 0 && gain.TravelProgress < .01f,
-                        "Exactly one additional beat precedes the fleet and the flight to the tally");
+                    Near(player.LifeIcons.Gain.LaunchAt, spike, "Earned life shares the final bar's spike time");
+                    Check(player.LifeIcons.RewardColor == session.ClearCelebration.LastColor &&
+                        session.ProgressBarColor == EnemyPalette.Get(player.LifeIcons.RewardColor.Value),
+                        "Reward color is reserved before the incoming life begins moving");
                 }
-                player.TickSurvival(10); session.Tick(10);
+                session.Tick(Mathf.Max(0, spike - .001f)); player.TickSurvival(Mathf.Max(0, spike - .001f));
+                Check(!player.LifeIcons.Choreography.Flipping, "Full-cap flip does not occur before the last spike");
+                if (rewarded) Check(player.LifeIcons.Gain.TravelProgress == 0, "New life cannot launch early");
+                session.Tick(.002f);
+                Check(player.LifeIcons.Choreography.Flipping == (full && !room),
+                    "Only a full set at the existing life cap flips the spare group");
+                player.TickSurvival(.002f);
+                if (rewarded) Check(player.LifeIcons.Gain.TravelProgress > 0, "Reward bounces on the final spike");
+                session.Pause();
+                float gainAge = player.LifeIcons.Gain.Age;
+                session.Tick(10); player.TickSurvival(10);
+                Check(player.LifeIcons.Gain.Age == gainAge && arrivals == 0, "Pause freezes the reward and refill");
+                session.Resume(); player.Music.StopPlayback();
+                session.Tick(10); player.TickSurvival(10); session.Tick(10); player.TickSurvival(10);
                 Check(arrivals == 1 && !player.LifeIcons.Animating && player.Lives == lives + (rewarded ? 1 : 0),
-                    "The reward lands once without duplicating lives or waves");
+                    "Reward and wave complete once without changing gameplay life counts");
+                if (rewarded) Check(player.LifeIcons.RewardColor == null,
+                    "The adopted next-wave color releases its temporary reward preview");
             });
         }
 
-        private static void CheckMusicSequence(bool mapped, bool lateFrame, bool counting)
+        private static void CheckMusicClock()
         {
+            foreach (bool mapped in new[] { false, true })
             SpecialEnemyChecks.Fixture((grid, player, tongue) =>
             {
-                var session = Session(grid, player);
-                var music = player.Music;
-                music.StopPlayback();
-                player.Hit(); player.TickSurvival(4);
-                var clip = AudioClip.Create(counting ? GameplayMusicPlayer.CountingResourceName : "DiscoDescent", 44100 * 20, 1, 44100, false);
+                var session = Session(grid, player); var music = player.Music;
+                music.StopPlayback(); player.Hit(); player.TickSurvival(4);
+                var clip = AudioClip.Create("Life trampoline clock", 44100 * 20, 1, 44100, false);
                 try
                 {
                     music.Source.clip = clip;
                     var cache = (System.Collections.Generic.Dictionary<AudioClip, SongBeatMap>)typeof(GameplayMusicPlayer)
                         .GetField("beatMaps", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(music);
                     cache[clip] = mapped ? new SongBeatMap { durationSeconds = 20,
-                        beatTimes = new[] { .1f, .6f, 1.1f, 1.6f, 1.85f, 2.1f, 2.35f, 3.1f, 3.85f, 4.6f, 5.35f, 6.1f, 6.85f } } : null;
-                    music.Source.Play();
-                    Seek(music, 2.125f);
+                        beatTimes = new[] { .1f, .6f, 1.1f, 1.6f, 1.85f, 2.1f, 2.35f, 3.1f, 3.85f, 4.6f, 5.35f, 6.1f } } : null;
+                    music.Source.Play(); Seek(music, 1.1f);
                     float began = music.PlaybackSeconds;
-                    float clearBeat = music.BeatPosition;
-                    float minimumBarBeats = GameSession.MinimumColorClearBarSequenceBeats(2);
-                    float downbeat = GameSession.RefillDownbeat(clearBeat, minimumBarBeats, true,
-                        music.CurrentDownbeatOffsetBeats, true);
-                    int arrivals = 0;
-                    session.WaveSpawned += () => arrivals++;
-                    ClearBars(grid, true);
+                    Clear(grid, true);
+                    float launch = began + session.ClearCelebration.FinalSpikeTime;
                     var gain = player.LifeIcons.Gain;
-                    Near(session.ClearCelebration.PlaybackDuration, music.SecondsAtBeat(downbeat - 2) - began,
-                        "The dynamic bar schedule reserves the life beat before the earliest fitting downbeat");
-                    Seek(music, downbeat - 2.01f); session.Tick(100); player.TickSurvival(100);
-                    Check(!gain.Active && arrivals == 0, "Music holds the reserved life until the final bar is gone");
-                    Seek(music, downbeat - (lateFrame ? .8f : 1.99f)); session.Tick(.001f); player.TickSurvival(.001f);
-                    if (lateFrame)
-                        Check(gain.Visible && gain.PulseProgress > .19f && gain.PulseProgress < .21f,
-                            "A missed bar-removal frame catches up to the planned reward beat without postponing it");
-                    else
-                    {
-                        Check(gain.Active && !gain.Visible && arrivals == 0, "The reward waits one actual beat after final removal");
-                        Seek(music, downbeat - 1.01f); session.Tick(100); player.TickSurvival(100);
-                        Check(!gain.Visible && arrivals == 0, "Frame duration cannot bring the life in before its music beat");
-                    }
-                    Seek(music, downbeat - .5f); session.Tick(.001f); player.TickSurvival(.001f);
-                    Check(gain.Visible && gain.PulseScale > 1.19f && gain.TravelProgress == 0 && arrivals == 0,
-                        "The intervening beat reveals and pulses the life even through tempo changes");
-                    Seek(music, downbeat - .01f); session.Tick(100); player.TickSurvival(100);
-                    Check(arrivals == 0 && gain.TravelProgress == 0, "Both flight and spawn wait for the downbeat");
-                    Seek(music, downbeat + .01f); session.Tick(.001f); player.TickSurvival(.001f);
-                    Check(arrivals == 1 && gain.TravelProgress > 0 && gain.TravelProgress < .03f,
-                        "The corrected song downbeat starts the fleet and the life flight together");
-                    Seek(music, downbeat + 1.01f); player.TickSurvival(.001f); session.Tick(.001f);
-                    Check(!gain.Active && arrivals == 1 && !player.LifeIcons.IsGainPending(player.ExtraLives - 1),
-                        "The next beat completes the flight exactly once");
+                    Seek(music, launch - .01f); session.Tick(100); player.TickSurvival(100);
+                    Check(gain.TravelProgress == 0 && gain.Visible, "Frame time cannot launch a reward before the music spike");
+                    Seek(music, launch + .01f); session.Tick(.001f); player.TickSurvival(.001f);
+                    Check(gain.TravelProgress > 0 && gain.TravelProgress < .1f, "Soundtrack sample clock launches the reward with the spike");
+                    Seek(music, began + gain.FinishAt + .01f); player.TickSurvival(.001f);
+                    Check(!gain.Active, "Reward completes across tempo changes without extra frames adding delay");
                 }
                 finally { music.StopPlayback(); UnityEngine.Object.DestroyImmediate(clip); }
             });
@@ -147,7 +142,7 @@ namespace CandyCruisers.Editor
             if (!Application.isPlaying) typeof(GameSession).GetMethod("OnEnable", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(session, null);
             return session;
         }
-        private static void ClearBars(EnemyGrid grid, bool full)
+        private static void Clear(EnemyGrid grid, bool full)
         {
             var red = ProgressionChecks.Add(grid, EnemyColor.Red, 0, 0);
             var blue = ProgressionChecks.Add(grid, EnemyColor.Blue, 2, 0);
@@ -155,8 +150,8 @@ namespace CandyCruisers.Editor
             if (!full) grid.ResetColorClearStreak();
             grid.ClearMatchingChain(blue.Id, EnemyColor.Blue);
         }
-        private static void Seek(GameplayMusicPlayer music, float beat) =>
-            music.Source.timeSamples = Mathf.RoundToInt(music.SecondsAtBeat(beat) * music.Source.clip.frequency);
+        private static void Seek(GameplayMusicPlayer music, float seconds) =>
+            music.Source.timeSamples = Mathf.RoundToInt(seconds * music.Source.clip.frequency);
         private static void Near(float a, float b, string message) => Check(Mathf.Abs(a - b) < .001f, message);
         private static void Check(bool value, string message)
         { if (!value) throw new Exception("Life reward check failed: " + message); }

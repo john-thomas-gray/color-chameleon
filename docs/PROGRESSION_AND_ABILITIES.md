@@ -4,16 +4,26 @@
 
 Missile hits and the last-Yellow transformation penalty use the same replaceable
 player-death cue as fatal contact. Each run starts with the active player plus
-three spare lives. Three miniature players replace the numeric Lives readout;
-their artwork, color and offbeat pulse match the player. After a recoverable hit,
-the rightmost spare waits one song beat, grows toward center, then bursts into
-fragments before respawn. The first three deaths spend spares; a fourth death ends
-the run unless a life has been regained. Full reward bar sets replenish one spare,
-capped at three.
+two spare lives. Two miniature slimes replace the numeric Lives readout. Their
+color follows the player and their art copies the actual player sprite pieces
+and proportions, while their movement is independent. They
+pulse together, occasionally swaying left and right for a complete four-beat
+measure. Routine changes only occur at measure boundaries. After a recoverable
+hit, the rightmost spare jumps down from the life row toward the player rather
+than draining, slashing or splitting. The third death ends the run unless a
+life has been regained. Full reward bar sets replenish one spare, capped at two.
+An earned slime emerges from behind the nearest border, takes a short step onto
+the final bar, then flips upward from its spike. Its arc clears the life-row
+ledge before descending into its slot. A full set at the existing cap makes all spare
+slimes flip together once; this one-off reaction need not wait for a measure.
 
-Normal respawn remains at 1.5 seconds with protection lasting until three seconds
-after the hit. Longer replacement death cues can delay respawn, but no longer delay
-the spare-life animation's next-beat entry. The fleet keeps moving; ordinary pause
+The replacement sometimes flips on takeoff (one chance in three). At the jump's
+apex, 0.33 seconds after the hit, the real player takes over and can move and
+fire during the descent while invincible and fully visible. Landing at 1.5 seconds
+begins the 1.5-second flashing protection timer; airborne time does not consume it.
+Replacement death cues do not delay control.
+If a landing gap is temporarily unsafe, the slime stays steerable above the row
+until it can land safely, retaining untimed protection until touchdown. The fleet keeps moving; ordinary pause
 also pauses recovery and the spare-life animation. A full enemy row at the player
 still forces game over regardless of spare lives.
 
@@ -391,8 +401,10 @@ Pause freezes the turn, and color changes or disabling the enemy clear the pose.
 The aimed shot keeps its launch direction for its entire flight: no tracking,
 turning or loops. It keeps the former special missile's 3.5-unit speed and opaque
 1.5-second white pulse, and retires at the playfield edges or after five seconds.
-Swept collision handles slow frames. If no living player is available at launch,
-the fallback direction is downward. Ordinary Reds retain their steady-colored,
+Swept collision handles slow frames. If no living player is available or the
+replacement is still falling, both the warning pose and launch direction point
+downward. Aimed fire resumes on landing, even during flashing protection.
+Ordinary Reds retain their steady-colored,
 downward 5-unit-per-second missiles. The legacy homing mode remains available in
 code but is no longer used by special Reds.
 
@@ -446,13 +458,22 @@ remain live during phase-in. The centralized spawn path triggers the effect for
 opening fleets, ordinary rows, refills, and summons without duplicate triggers.
 
 The last hit no longer cancels the tongue. It retracts visibly while the fleet
-is paused, and the earned bars divide the available current-song beats before
-the next eligible spawn downbeat. Removing the last regular bar leaves the field
-empty and holds the player's final color for the reserved beat before the next
-fleet starts; earned-life clears reserve an additional beat for the life pulse.
-With no active music, the bars divide one beat at the current tempo. Pause also
-freezes the gap. Player movement remains active, but firing into an empty field
-is blocked.
+is paused. Partial clears spike every earned bar at once and power them down
+together across the remaining time to the next eligible spawn downbeat, fading
+their glow back to the default unpowered bar color without further beat pulsing. Complete
+sets divide the available current-song beats across the earned bars, then leave
+the field empty and hold the player's final color for the reserved beat before
+the next fleet starts; earned-life clears retain their additional reserved beat
+while the incoming slime bounces up from the final spike. With no active music,
+partial bars power down over one beat at the current
+tempo. Pause also freezes the gap. Player movement remains active, but firing
+into an empty field is blocked.
+
+Newly unlocked sound-bar slots stay hidden until the activated bars finish their
+clear celebration. The existing slots retain their old widths throughout that
+animation. Over the following beat, the new slots grow from zero width while the
+existing slots narrow into the new equal-width layout. This presentation-only
+transition pauses with gameplay and does not delay enemy spawning.
 
 At fleet clear, the spawner prepares the exact next batch using the new level
 and current override. The player keeps the outgoing shot color until the tongue

@@ -27,6 +27,27 @@ namespace CandyCruisers.Editor
             }
             Check(visited.Count == colors.Count && colors.All(c => !celebration.Visible(c)), "All earned colors cycle and all bars are removed");
             Check(celebration.Finished && celebration.Color == EnemyPalette.Get(celebration.LastColor.Value), "Transition finishes on the reserved color, never white");
+            int simultaneousRemovals = 0;
+            celebration.ColorRemoved += _ => simultaneousRemovals++;
+            celebration.Begin(colors.Take(3).ToList(), duration: 2, simultaneousPowerDown: true);
+            var early = celebration.Present(colors[0], resting);
+            Check(celebration.SimultaneousPowerDown && celebration.PowerDownProgress == 0,
+                "Partial power-down exposes a non-pulsing shared progress value");
+            Check(SameColor(GameSession.ColorClearBarPowerDownTint(colors[0], 0), GameSession.ColorClearBarTint(colors[0], true)) &&
+                SameColor(GameSession.ColorClearBarPowerDownTint(colors[0], 1), GameSession.ColorClearBarTint(colors[0], false)),
+                "Partial power-down fades back to the default unpowered bar color instead of disappearing");
+            celebration.Tick(.3f);
+            var redSpike = celebration.Present(colors[0], resting);
+            var blueSpike = celebration.Present(colors[1], resting);
+            Check(celebration.Color == Color.white && redSpike.height > early.height && redSpike == blueSpike &&
+                redSpike.x == resting.x && redSpike.width == resting.width && celebration.PowerDownProgress > 0,
+                "Partial wave clears spike every earned bar vertically while the player flash stays white");
+            celebration.Tick(1.1f);
+            Check(celebration.Present(colors[0], resting).height < redSpike.height && colors.Take(3).All(celebration.Visible),
+                "Simultaneous partial bars power down together before disappearing");
+            celebration.Tick(.61f);
+            Check(simultaneousRemovals == 3 && colors.Take(3).All(c => !celebration.Visible(c)),
+                "Simultaneous partial bars all disappear on the shared downbeat");
             for (int count = 1; count <= colors.Count; count++)
             {
                 celebration.Begin(colors.Take(count).ToList());
@@ -38,7 +59,8 @@ namespace CandyCruisers.Editor
             celebration.Reset();
             Check(!celebration.Active && colors.All(celebration.Visible), "Reset restores ordinary bar presentation");
             celebration.Begin(colors, new[] { EnemyColor.Green });
-            Check(celebration.LastColor == EnemyColor.Green, "Final random bar is present in the next fleet");
+            Check(celebration.LastColor == colors.OrderBy(color => color).Last(),
+                "Full-set wave finishes on the rightmost bar; the session reserves that color in the next fleet");
             foreach (bool magic in new[] { false, true })
             foreach (bool fullLives in new[] { false, true })
             SpecialEnemyChecks.Fixture((grid, player, tongue) =>
@@ -104,23 +126,33 @@ namespace CandyCruisers.Editor
                 Check(session.ClearCelebration.Active && grid.AllColorClearBarsFilled == !partial && jackpots == (partial ? 0 : 1),
                     "Both complete and partial sets transition, with a jackpot only for complete sets");
                 var earned = partial ? new[] { EnemyColor.Blue, EnemyColor.Green } : new[] { EnemyColor.Red, EnemyColor.Blue, EnemyColor.Green };
+                var powerDownVoice = partial ? grid.GetComponentsInChildren<AudioSource>()
+                    .FirstOrDefault(source => source.clip == sounds.GetClip(SoundEffect.BarPowerDown)) : null;
                 int hidden = 0;
                 float transitionDuration = session.ClearCelebration.PlaybackDuration;
+                if (partial)
+                    Check(pitches.Count == 1 && powerDownVoice != null &&
+                        Mathf.Abs(powerDownVoice.clip.length / powerDownVoice.pitch - transitionDuration) < .001f,
+                        "Partial sets play one power-down tone stretched across the whole transition");
                 for (int i = 0; i < 120; i++)
                 {
                     session.ClearCelebration.Tick(transitionDuration / 120 + .000001f);
                     hidden = earned.Count(c => !session.ClearCelebration.Visible(c));
-                    Check(pitches.Count == hidden, "Each removal tone coincides with one earned rectangle disappearing");
+                    Check(partial ? hidden == 0 || hidden == earned.Length : pitches.Count == hidden,
+                        "Removal tones match the earned-rectangle disappearance pattern");
                 }
-                Check(pitches.Count == earned.Length && wrongTones == 0, "Exactly one correctly directed tone per bar");
+                Check(pitches.Count == (partial ? 1 : earned.Length) && wrongTones == 0,
+                    "Partial sets use one directed tone; complete sets keep one tone per bar");
                 for (int i = 1; i < pitches.Count; i++)
-                    Check(partial ? pitches[i] < pitches[i - 1] : pitches[i] > pitches[i - 1],
-                        "Partial sets descend; complete sets ascend");
+                    Check(pitches[i] > pitches[i - 1], "Complete sets ascend");
                 session.ClearCelebration.Tick(10);
-                Check(pitches.Count == earned.Length, "No repeated removal tones after completion");
+                Check(pitches.Count == (partial ? 1 : earned.Length), "No repeated removal tones after completion");
                 Check(sounds.GetClip(expectedEffect).length > .2f, "Replaceable removal cue has an audio clip");
             });
         }
+        private static bool SameColor(Color a, Color b) =>
+            Mathf.Abs(a.r - b.r) < .0001f && Mathf.Abs(a.g - b.g) < .0001f &&
+            Mathf.Abs(a.b - b.b) < .0001f && Mathf.Abs(a.a - b.a) < .0001f;
         private static void Check(bool value, string message)
         { if (!value) throw new Exception("Jackpot check failed: " + message); }
     }

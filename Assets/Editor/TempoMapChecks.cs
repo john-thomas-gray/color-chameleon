@@ -110,6 +110,20 @@ namespace CandyCruisers.Editor
                 Check(!music.ContainsTrack("We Are Not Anonymous") &&
                     !music.ContainsTrack("PoisonWasTheCure") && !music.ContainsTrack("DriveSlow"),
                     "Removed soundtrack entries stay out of the playlist");
+                Check(music.ContainsTrack("Contact"), "Trimmed Contact recording is registered in the playlist");
+                var contactAsset = Resources.Load<TextAsset>("BeatMaps/Contact");
+                var contactMap = contactAsset != null ? JsonUtility.FromJson<SongBeatMap>(contactAsset.text) : null;
+                Check(contactMap != null && contactMap.IsValid(contactMap.durationSeconds) &&
+                    Mathf.Abs(contactMap.durationSeconds - 232.826485f) < .001f,
+                    "Contact map matches the requested 55.380-288.206-second edit");
+                var contactClip = Resources.Load<AudioClip>("Contact");
+                if (contactClip != null)
+                {
+                    music.Source.clip = contactClip;
+                    Check(music.UsesBeatMap && music.CurrentDownbeatOffsetBeats == 0 &&
+                        music.CurrentRelativeMajorTonic == 2,
+                        "Contact uses its analyzed beats, opening downbeat and D-major tonal metadata");
+                }
                 foreach (string name in new[] { "We Are Not Anonymous", "PoisonWasTheCure", "DriveSlow" })
                 {
                     var saved = Resources.Load<TextAsset>("BeatMaps/" + name);

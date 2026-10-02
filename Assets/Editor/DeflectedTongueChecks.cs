@@ -20,11 +20,17 @@ namespace CandyCruisers.Editor
                 tongue.TryFire(EnemyColor.Red, 10);
                 tongue.Tick(.34f, grid);
                 Check(tongue.IsDeflected && player.Stunned && tongue.Retracting, "Special Blue starts the slow stunned return");
+                float beat = player.Music != null ? player.Music.SecondsForBeats(1) : TongueShot.ShieldShockSeconds;
+                Check(Mathf.Abs(tongue.ShockDuration - beat) < .0001f,
+                    "Shield electricity lasts one soundtrack beat when the tongue has enough return distance");
                 float before = tongue.Length;
                 tongue.Tick(.02f, grid);
                 float expected = 20 * Mathf.Max(.01f, .25f - .01f * level);
                 Check(Mathf.Abs((before - tongue.Length) - expected * .02f) < .0001f,
                     "Deflected return matches archived speed at level " + level);
+                Check(tongue.TipBulb != null && tongue.TipBulb.enabled &&
+                    ColorDistance(tongue.TipBulb.color, tongue.GetComponent<LineRenderer>().colorGradient.Evaluate(1)) < .01f,
+                    "Deflected bulb follows the electrically traversed tongue tip");
                 tongue.Tick(100, grid);
                 Check(!tongue.Active && !player.Stunned, "Even high-level deflection finishes and releases stun");
                 tongue.TryFire(EnemyColor.Red, 1);
@@ -55,5 +61,7 @@ namespace CandyCruisers.Editor
         }
         private static void Check(bool value, string message)
         { if (!value) throw new Exception("Deflected tongue check failed: " + message); }
+        private static float ColorDistance(Color a, Color b) =>
+            Mathf.Abs(a.r - b.r) + Mathf.Abs(a.g - b.g) + Mathf.Abs(a.b - b.b) + Mathf.Abs(a.a - b.a);
     }
 }

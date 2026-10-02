@@ -132,7 +132,7 @@ namespace CandyCruisers
         private double AdvanceBeatClock(double seconds, float beatDuration, out double previous)
         {
             var music = GetComponent<GameplayMusicPlayer>();
-            if (Application.isPlaying && music != null && music.Source != null && music.Source.isPlaying)
+            if (Application.isPlaying && music != null && music.BeatClockRunning)
             {
                 double current = music.BeatPosition;
                 previous = beatClockInitialized && beatClockUsesMusic ? beatPosition : current;

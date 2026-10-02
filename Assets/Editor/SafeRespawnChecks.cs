@@ -17,7 +17,8 @@ namespace CandyCruisers.Editor
                 // Placement uses the live fleet position at respawn, not at death.
                 grid.transform.position += Vector3.right * (x - enemy.transform.position.x);
                 player.TickSurvival(1.5f);
-                Check(player.Alive && player.Invulnerable, "Respawn with protection");
+                Check(player.Alive && player.Invulnerable, "Respawn with protection: x=" + x + " position=" + player.transform.position +
+                    " alive=" + player.Alive + " falling=" + player.ReplacementFalling + " bounds=" + player.HitBounds);
                 CheckClearance(grid, player);
                 Check(player.HitBounds.min.x >= -3 && player.HitBounds.max.x <= 3, "Respawn fully inside the field");
             });
@@ -28,14 +29,21 @@ namespace CandyCruisers.Editor
                     ProgressionChecks.Add(grid, EnemyColor.Blue, col, GridModel.Rows - 1);
                 player.transform.position = new Vector3(0, -4.6f, 0);
                 player.Hit(); player.TickSurvival(10);
-                Check(!player.Alive && player.Lives == PlayerMovement.MaxLives - 1 && !player.Fire(), "Fully blocked row defers respawn without spending lives");
+                Check(player.Alive && player.ReplacementFalling && player.Lives == PlayerMovement.MaxLives - 1,
+                    "Blocked landing remains controllable without spending another life");
                 player.TickSurvival(10);
-                Check(!player.Alive && player.Invulnerable, "Blocked recovery cannot expire into danger");
+                Check(player.Alive && player.Invulnerable && !player.RespawnProtectionActive && !player.Hit(),
+                    "Blocked landing stays invincible without beginning the flashing protection timer");
                 foreach (var enemy in grid.GetComponentsInChildren<GridEnemy>())
                     if (enemy.Column >= 3) { grid.Unregister(enemy); UnityEngine.Object.DestroyImmediate(enemy.gameObject); }
-                player.TickSurvival(.02f);
-                Check(player.Alive && player.Invulnerable, "A newly opened gap permits protected respawn");
+                player.TickSurvival(10);
+                Check(player.Alive && player.Invulnerable && player.RespawnProtectionActive && !player.ReplacementFalling,
+                    "A newly opened gap starts fresh landing protection even after a long blocked frame");
                 CheckClearance(grid, player);
+                player.TickSurvival(1.49f);
+                Check(player.Invulnerable, "A delayed landing retains the full protection interval");
+                player.TickSurvival(.02f);
+                Check(!player.Invulnerable, "Delayed landing protection expires normally");
             });
             SpecialEnemyChecks.Fixture((grid, player, tongue) =>
             {

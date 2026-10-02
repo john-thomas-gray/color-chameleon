@@ -13,11 +13,9 @@ namespace CandyCruisers
         private static readonly EnemyColor[] Colors = (EnemyColor[])System.Enum.GetValues(typeof(EnemyColor));
         private readonly EnemyColor[] earnedColors = new EnemyColor[Colors.Length];
         public const float SpawnPulseSeconds = 60f / GameplayMusicPlayer.DefaultBeatsPerMinute;
-        public const float SpawnCrunchThickness = 3f;
         private GameSession subscribedSession;
         private float spawnPulseDuration = SpawnPulseSeconds;
         private float spawnPulseRemaining;
-        private GameplayFraming crunchFraming;
         private SpriteMask playerClip;
         private Sprite clipSprite;
         private SpriteRenderer[] clippedSprites;
@@ -108,8 +106,6 @@ namespace CandyCruisers
         private void LateUpdate() { BindSession(); Tick(Time.deltaTime); }
         public void TriggerSpawnPulse()
         {
-            if (crunchFraming == null && Camera.main != null)
-                crunchFraming = Camera.main.GetComponent<GameplayFraming>();
             var music = player != null ? player.Music : null;
             spawnPulseDuration = music != null ? Mathf.Max(.0001f, music.BeatDuration) : SpawnPulseSeconds;
             spawnPulseRemaining = spawnPulseDuration;
@@ -133,16 +129,22 @@ namespace CandyCruisers
         public void RefreshBeat(float beatPosition)
         {
             if (boundary == null) return;
+            if (player != null && player.ReturnColorPreview.HasValue)
+            {
+                ApplyTint(player.AccentColor);
+                return;
+            }
             int phase = Mathf.FloorToInt(Mathf.Max(0, beatPosition) * 2);
-            ApplyTint(player != null && player.HasFleet && phase % 2 != 0 ? player.DisplayColor : Color.white);
+            ApplyTint(player != null && player.HasFleet && phase % 2 != 0 ? player.AccentColor : Color.white);
         }
 
         public void Refresh(float time)
         {
             if (boundary == null) return;
-            var color = player != null ? player.DisplayColor : EnemyPalette.Get(EnemyColor.Blue);
+            bool returnPreview = player != null && player.ReturnColorPreview.HasValue;
+            var color = player != null ? player.AccentColor : EnemyPalette.Get(EnemyColor.Blue);
             int count = 0;
-            if (player != null && !player.CelebrationColor.HasValue && player.MagicCharges > 0)
+            if (!returnPreview && player != null && !player.CelebrationColor.HasValue && player.MagicCharges > 0)
                 foreach (var earned in Colors)
                     if (player.HasColorClearBar(earned)) earnedColors[count++] = earned;
             if (count > 0)
@@ -156,23 +158,13 @@ namespace CandyCruisers
 
         private void ApplyTint(Color color)
         {
-            float pulse = SpawnPulseActive ? Mathf.Pow(Mathf.Sin(Mathf.PI *
-                Mathf.Clamp01(spawnPulseRemaining / spawnPulseDuration)), 2) : 0;
-            float screenScale = 1;
-            if (crunchFraming != null)
-            {
-                crunchFraming.SetWaveCrunch(pulse);
-                screenScale = crunchFraming.WaveCrunchScale;
-                if (!SpawnPulseActive) crunchFraming = null;
-            }
-            float thickness = Mathf.Lerp(1, SpawnCrunchThickness, pulse) / screenScale;
-            boundary.startWidth = boundary.endWidth = .045f * thickness;
-            if (outline != null) outline.startWidth = outline.endWidth = .018f * thickness;
+            boundary.startWidth = boundary.endWidth = .045f;
+            if (outline != null) outline.startWidth = outline.endWidth = .018f;
             Tint(boundary, color, .85f);
             Tint(outline, color, .5f);
             foreach (var corner in corners)
             {
-                if (corner != null) corner.startWidth = corner.endWidth = .065f * thickness;
+                if (corner != null) corner.startWidth = corner.endWidth = .065f;
                 Tint(corner, color, 1);
             }
             // Do not serialize temporary mask settings into scene snapshots on entering play mode.

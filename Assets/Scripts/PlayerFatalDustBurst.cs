@@ -6,33 +6,30 @@ namespace CandyCruisers
     // Detached game-over artwork; its owning cue controls time and cleanup.
     public sealed class PlayerFatalDustBurst : MonoBehaviour
     {
-        public const float Duration = PlayerDeathBurst.Duration;
-        public const int CoreGrainsPerColor = 10;
-        public const int ShockRingGrainsPerColor = 8;
-        public const int GrainsPerColor = CoreGrainsPerColor + ShockRingGrainsPerColor;
-        private SpriteRenderer[] grains;
-        private EnemyColor[] grainColors;
-        private bool[] shockRing;
-        private Vector3[] origins;
-        private Vector3[] directions;
-        private float[] speeds;
-        private float[] sizes;
+        public const float Duration = 2.4f;
+        public const int CoreGrains = 640;
+        public const int SprayGrains = 320;
+        public const int GrainCount = CoreGrains + SprayGrains;
+        private readonly Vector3[] vertices = new Vector3[GrainCount * 4];
+        private readonly Color[] colors = new Color[GrainCount * 4];
+        private readonly Vector3[] directions = new Vector3[GrainCount];
+        private readonly float[] speeds = new float[GrainCount];
+        private readonly float[] sizes = new float[GrainCount];
+        private readonly Color[] tints = new Color[GrainCount];
+        private Mesh mesh;
+        private MeshRenderer visual;
+        private Material material;
+        private SpriteRenderer flash;
 
         public static PlayerFatalDustBurst Create(SpriteRenderer source, Transform parent, int level)
         {
-            var root = new GameObject("Player fatal dust burst");
+            var root = new GameObject("Player fatal dust burst", typeof(MeshFilter), typeof(MeshRenderer));
             root.transform.SetParent(parent, false);
             var burst = root.AddComponent<PlayerFatalDustBurst>();
-            var colors = UnlockedColors(level);
-            int count = colors.Count * GrainsPerColor;
-            burst.grains = new SpriteRenderer[count];
-            burst.grainColors = new EnemyColor[count];
-            burst.shockRing = new bool[count];
-            burst.origins = new Vector3[count];
-            burst.directions = new Vector3[count];
-            burst.speeds = new float[count];
-            burst.sizes = new float[count];
-
+            var palette = new List<Color>();
+            foreach (EnemyColor color in System.Enum.GetValues(typeof(EnemyColor)))
+                if (RunProgress.IsUnlocked(color, level)) palette.Add(EnemyPalette.Get(color));
+            if (palette.Count == 0) palette.Add(EnemyPalette.Get(EnemyColor.Red));
             var bounds = source.bounds;
             var visuals = source.GetComponentInParent<CharacterVisuals>();
             if (visuals != null)
@@ -40,81 +37,89 @@ namespace CandyCruisers
                     if (sprite != null && sprite.sprite != null) bounds.Encapsulate(sprite.bounds);
             root.transform.position = bounds.center;
 
-            int sortingOrder = source.sortingOrder + 28;
-            for (int colorIndex = 0; colorIndex < colors.Count; colorIndex++)
-            for (int grain = 0; grain < GrainsPerColor; grain++)
+            // One textured mesh keeps the dense powder spray to one draw, even at opening levels.
+            burst.material = new Material(Shader.Find("Sprites/Default"))
+                { name = "Fatal multicolored powder", mainTexture = EnemyPlaceholderArt.SpaceDust.texture };
+            burst.visual = root.GetComponent<MeshRenderer>();
+            burst.visual.sharedMaterial = burst.material;
+            burst.visual.sortingLayerID = source.sortingLayerID;
+            burst.visual.sortingOrder = source.sortingOrder + 28;
+            burst.mesh = new Mesh { name = "Fatal powder spray" };
+            burst.mesh.MarkDynamic();
+            root.GetComponent<MeshFilter>().sharedMesh = burst.mesh;
+            var coordinates = new Vector2[GrainCount * 4];
+            var triangles = new int[GrainCount * 6];
+            var random = new System.Random(7319);
+            for (int i = 0; i < GrainCount; i++)
             {
-                int index = colorIndex * GrainsPerColor + grain;
-                float seed = Mathf.Repeat(index * .618034f + colorIndex * .173f, 1);
-                bool ring = grain >= CoreGrainsPerColor;
-                int ringIndex = grain - CoreGrainsPerColor;
-                float angle = ring ? ringIndex * Mathf.PI * 2 / ShockRingGrainsPerColor + colorIndex * .29f :
-                    index * 2.399963f + colorIndex * .41f;
-                var direction = ring ? new Vector3(Mathf.Cos(angle), Mathf.Sin(angle) * .14f, 0) :
-                    new Vector3(Mathf.Cos(angle), Mathf.Sin(angle), 0).normalized;
-                var renderer = new GameObject("Player fatal dust", typeof(SpriteRenderer)).GetComponent<SpriteRenderer>();
-                renderer.transform.SetParent(root.transform, false);
-                renderer.sprite = EnemyPlaceholderArt.SpaceDust;
-                renderer.sharedMaterial = source.sharedMaterial;
-                renderer.sortingOrder = sortingOrder + (ring ? 2 : 0);
-                burst.grains[index] = renderer;
-                burst.grainColors[index] = colors[colorIndex];
-                burst.shockRing[index] = ring;
-                burst.origins[index] = ring ?
-                    direction * Mathf.Lerp(.01f, .035f, seed) + Vector3.up * Mathf.Lerp(-.008f, .008f, Mathf.Repeat(seed * 1.73f, 1)) :
-                    direction * Mathf.Lerp(.015f, .14f, seed) + Vector3.up * Mathf.Lerp(-.07f, .09f, Mathf.Repeat(seed * 1.73f, 1));
-                burst.directions[index] = direction;
-                burst.speeds[index] = ring ? Mathf.Lerp(1.7f, 2.95f, Mathf.Repeat(seed * 2.31f, 1)) :
-                    Mathf.Lerp(.45f, 1.45f, Mathf.Repeat(seed * 2.31f, 1));
-                burst.sizes[index] = EnemyPlaceholderArt.RandomDustSize(ring ? .35f : .5f);
+                float seed = (float)random.NextDouble();
+                float angle = (float)random.NextDouble() * Mathf.PI * 2;
+                // Uneven lobes carry the spray diagonally across the shockwave's plane.
+                float fan = .68f + .32f * Mathf.Pow(Mathf.Abs(Mathf.Cos(angle - .45f)), 3);
+                burst.directions[i] = new Vector3(Mathf.Cos(angle), Mathf.Sin(angle), 0);
+                burst.speeds[i] = (i < CoreGrains ? Mathf.Lerp(.25f, 2.8f, seed * seed) :
+                    Mathf.Lerp(2.8f, 5.8f, seed)) * fan;
+                burst.sizes[i] = Mathf.Lerp(.03f, .11f, Mathf.Pow((float)random.NextDouble(), 2));
+                burst.tints[i] = palette[i % palette.Count];
+                int vertex = i * 4, triangle = i * 6;
+                coordinates[vertex] = Vector2.zero;
+                coordinates[vertex + 1] = Vector2.right;
+                coordinates[vertex + 2] = Vector2.one;
+                coordinates[vertex + 3] = Vector2.up;
+                triangles[triangle] = vertex; triangles[triangle + 1] = vertex + 2; triangles[triangle + 2] = vertex + 1;
+                triangles[triangle + 3] = vertex; triangles[triangle + 4] = vertex + 3; triangles[triangle + 5] = vertex + 2;
             }
+            burst.mesh.vertices = burst.vertices;
+            burst.mesh.uv = coordinates;
+            burst.mesh.triangles = triangles;
+            burst.flash = new GameObject("Fatal detonation flash", typeof(SpriteRenderer)).GetComponent<SpriteRenderer>();
+            burst.flash.transform.SetParent(root.transform, false);
+            burst.flash.sprite = EnemyPlaceholderArt.SpaceDust;
+            burst.flash.sharedMaterial = source.sharedMaterial;
+            burst.flash.sortingOrder = source.sortingOrder + 31;
             burst.Present(0);
             return burst;
         }
 
-        private static List<EnemyColor> UnlockedColors(int level)
-        {
-            var colors = new List<EnemyColor>();
-            foreach (EnemyColor color in System.Enum.GetValues(typeof(EnemyColor)))
-                if (RunProgress.IsUnlocked(color, level)) colors.Add(color);
-            if (colors.Count == 0) colors.Add(EnemyColor.Red);
-            return colors;
-        }
-
         public void Present(float age)
         {
-            float t = Mathf.Clamp01(age / Duration);
-            float drift = 1 - Mathf.Pow(1 - t, 3);
-            for (int i = 0; i < grains.Length; i++)
+            float flight = Mathf.Max(0, age - PlayerDeathBurst.ShatterSeconds);
+            float t = Mathf.Clamp01(flight / (Duration - PlayerDeathBurst.ShatterSeconds));
+            float gather = Mathf.Clamp01(age / PlayerDeathBurst.ShatterSeconds);
+            var camera = Camera.main;
+            float viewScale = camera != null && camera.orthographic ?
+                camera.orthographicSize * 2 * Mathf.Min(1, camera.aspect) / 6.4f : 1;
+            visual.enabled = age >= 0 && age < Duration;
+            flash.enabled = age >= PlayerDeathBurst.ShatterSeconds && flight < .12f;
+            flash.transform.localScale = Vector3.one * Mathf.Lerp(.85f, 1.6f, flight / .12f) * viewScale;
+            flash.color = new Color(1, 1, 1, 1 - Mathf.Clamp01(flight / .12f));
+            for (int i = 0; i < GrainCount; i++)
             {
-                var grain = grains[i];
-                grain.enabled = age >= 0 && age < Duration;
-                float shimmer = .5f + .5f * Mathf.Sin(age * (7 + i % 6) + i * 2.399963f);
-                if (shockRing[i])
-                {
-                    float ring = Mathf.Clamp01((age - PlayerDeathBurst.ShatterSeconds * .55f) / (Duration - PlayerDeathBurst.ShatterSeconds * .55f));
-                    float ringDrift = 1 - Mathf.Pow(1 - ring, 4);
-                    float ripple = Mathf.Sin(age * 16 + i * 1.7f) * .012f * (1 - ring * .35f);
-                    grain.transform.localPosition = origins[i] + directions[i] * (.08f + speeds[i] * ringDrift) +
-                        Vector3.up * ripple;
-                    grain.transform.localScale = Vector3.one * sizes[i] * Mathf.Lerp(1.45f, .66f, ring) *
-                        Mathf.Lerp(.88f, 1.18f, shimmer);
-                    var color = Color.Lerp(Color.white, EnemyPalette.Get(grainColors[i]), Mathf.Clamp01(ring * 4.5f));
-                    color.a = Mathf.SmoothStep(0, 1, ring * 6) * (1 - ring * ring) * Mathf.Lerp(.78f, 1, shimmer);
-                    grain.color = color;
-                    continue;
-                }
+                float seed = Mathf.Repeat(i * .618034f, 1);
+                float perspective = 1 / (1 - t * Mathf.Lerp(.12f, .62f, seed));
+                float travel = flight * speeds[i] * perspective;
                 Vector3 sideways = new Vector3(-directions[i].y, directions[i].x, 0) *
-                    Mathf.Sin(age * (1.1f + i % 4 * .17f) + i) * .035f * t;
-                grain.transform.localPosition = origins[i] + directions[i] * (.08f + speeds[i] * drift) +
-                    sideways + Vector3.down * t * t * .26f;
-                float flash = Mathf.Max(0, 1 - Mathf.Abs(age - PlayerDeathBurst.ShatterSeconds) / .16f);
-                grain.transform.localScale = Vector3.one * sizes[i] * Mathf.Lerp(1.3f + flash * .65f, .78f, t) *
-                    Mathf.Lerp(.9f, 1.14f, shimmer);
-                var coreColor = Color.Lerp(Color.white, EnemyPalette.Get(grainColors[i]), Mathf.Clamp01(t * 3.2f));
-                coreColor.a = (1 - t * t) * Mathf.Lerp(.72f, 1, shimmer);
-                grain.color = coreColor;
+                    Mathf.Sin(flight * 1.7f + i) * .08f * t;
+                Vector3 position = (directions[i] * (travel + .14f * seed * (1 - gather)) + sideways) * viewScale;
+                float size = sizes[i] * perspective * viewScale;
+                int vertex = i * 4;
+                vertices[vertex] = position + new Vector3(-size, -size);
+                vertices[vertex + 1] = position + new Vector3(size, -size);
+                vertices[vertex + 2] = position + new Vector3(size, size);
+                vertices[vertex + 3] = position + new Vector3(-size, size);
+                var tint = Color.Lerp(Color.white, tints[i], Mathf.Clamp01(flight / .1f));
+                tint.a = (1 - Mathf.SmoothStep(0, 1, (t - .63f) / .37f)) * Mathf.Lerp(.55f, 1, seed);
+                for (int corner = 0; corner < 4; corner++) colors[vertex + corner] = tint;
             }
+            mesh.vertices = vertices;
+            mesh.colors = colors;
+            mesh.RecalculateBounds();
+        }
+
+        private void OnDestroy()
+        {
+            if (Application.isPlaying) { Destroy(mesh); Destroy(material); }
+            else { DestroyImmediate(mesh); DestroyImmediate(material); }
         }
     }
 }

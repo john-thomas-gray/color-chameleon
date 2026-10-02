@@ -30,6 +30,7 @@ namespace CandyCruisers.Editor
                 missile.SetTarget(player);
                 player.transform.position = new Vector3(enemy.transform.position.x, -4.6f, 0);
                 Check(session.CheckPlayerContact() && session.State == GameSession.RunState.Dying, "Final contact begins death, not game-over overlay");
+                Check(!session.HandleMenuKey(KeyCode.Space), "Space cannot skip the fatal fade");
                 Check(defeats == 0 && player.FatallyDefeated && !player.Alive && player.ControlsLocked,
                     "Fatal defeat locks the player without triggering the regular death animation");
                 Check(CharacterVisuals.Ensure(player.gameObject).Body.enabled, "Live player art remains intact during the fade");
@@ -46,18 +47,20 @@ namespace CandyCruisers.Editor
                     "Only after four beats does the game-over cue replace the intact player");
                 session.Tick(.45f);
                 Check(session.State == GameSession.RunState.Dying, "Game-over overlay stays hidden mid-animation");
+                Check(!session.HandleMenuKey(KeyCode.Space), "Space cannot skip the fatal animation");
                 if (Application.isPlaying)
                 {
                     var cue = (PresentationCue)typeof(GameSession).GetField("deathCue",
                         System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).GetValue(session);
                     var burst = cue.GetComponentInChildren<PlayerFatalDustBurst>();
-                    Check(burst != null && burst.GetComponentsInChildren<SpriteRenderer>().Any(sprite => sprite.enabled),
+                    Check(burst != null && burst.GetComponent<MeshRenderer>().enabled,
                         "The active fatal death cue displays the player's space dust");
                 }
-                session.Tick(.44f);
+                session.Tick(PlayerFatalDustBurst.Duration - .46f);
                 Check(session.State == GameSession.RunState.Dying, "Game over waits for the whole death animation");
                 session.Tick(.02f);
                 Check(session.State == GameSession.RunState.GameOver && defeats == 1, "Game over follows animation exactly once");
+                Check(!session.HandleMenuKey(KeyCode.Space), "Space cannot skip the game-over title reveal");
                 session.Tick(10);
                 Check(!player.Alive && defeats == 1, "Finished death never reappears or retriggers");
             });
@@ -135,10 +138,10 @@ namespace CandyCruisers.Editor
                     {
                         elapsed += step;
                         session.Tick(step);
-                        Check(shatters == (elapsed >= fade + PlayerDeathBurst.ShatterSeconds ? 1 : 0),
-                            "Sound and fracture share the same timeline with short or long frames");
+                        Check(shatters == (elapsed >= fade + PlayerDeathBurst.ShatterSoundSeconds ? 1 : 0),
+                            "Shatter audio leads the visual fracture without drifting on short or long frames");
                         Check(defeats == (elapsed >= fade ? 1 : 0), "Death hooks cannot run before the fade finishes");
-                        Check(elapsed < fade + PlayerDeathBurst.Duration ? session.State == GameSession.RunState.Dying :
+                        Check(elapsed < fade + PlayerFatalDustBurst.Duration ? session.State == GameSession.RunState.Dying :
                             session.State == GameSession.RunState.GameOver,
                             "Only time beyond the fade boundary advances the death animation, even on long frames");
                         if (elapsed < fade)
@@ -192,16 +195,18 @@ namespace CandyCruisers.Editor
                     Check(missile.Finished, "Missile hits the player");
                 }
                 Check(deaths == 1 && player.Lives == PlayerMovement.MaxLives - 1 && !player.Alive &&
-                    !player.FatallyDefeated && player.Invulnerable,
+                    !player.FatallyDefeated && !player.Invulnerable,
                     "Missile and last-Yellow penalties trigger recoverable death cues");
                 Check(!player.Hit() && deaths == 1, "Repeated hit cannot duplicate death animation");
-                player.TickSurvival(.45f);
-                Check(!player.Alive && player.GetComponentsInChildren<SpriteRenderer>().All(sprite => !sprite.enabled),
-                    "Live art stays hidden during recoverable death");
+                float takeoff = PlayerLifeIcons.ApexSeconds + .1f;
+                player.TickSurvival(takeoff);
+                Check(player.Alive && player.ReplacementFalling && player.Invulnerable && !player.RespawnProtectionActive &&
+                    player.GetComponentsInChildren<SpriteRenderer>().Any(sprite => sprite.enabled),
+                    "Actual player is controllable and invincible after the apex, without timed landing protection yet");
                 if (Application.isPlaying)
                     Check(UnityEngine.Object.FindObjectsByType<PlayerDeathBurst>(FindObjectsSortMode.None).Any(),
                         "Recoverable death keeps rendering the ordinary player burst");
-                player.TickSurvival(1.05f);
+                player.TickSurvival(PlayerLifeIcons.Duration - takeoff);
                 Check(player.Alive && player.Invulnerable && !player.FatallyDefeated,
                     "Normal respawn remains at 1.5 seconds with protection");
                 player.TickSurvival(1.5f);
