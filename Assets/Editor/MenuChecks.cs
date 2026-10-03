@@ -47,10 +47,12 @@ namespace CandyCruisers.Editor
                 "Mid-density phone screens use the medium interface scale");
             Check(GameSession.GuiScaleFor(true, 1179, 2556) == GameSession.LargePhoneGuiScale,
                 "Dense iPhone-class screens use the large interface scale");
+            CheckPauseButtonPlatform();
             CheckMainMenuTitle();
             CheckMenuEyeTrackingDelay();
             CheckMenuIntroSkip();
             CheckLevelSelectUnlock();
+            CheckLevelSelectTouches();
             SpecialEnemyChecks.Fixture((grid, player, tongue) =>
             {
                 var session = grid.gameObject.AddComponent<GameSession>();
@@ -396,9 +398,13 @@ namespace CandyCruisers.Editor
             PlayerPrefs.DeleteKey(GameSession.HighestReachedLevelKey);
 
             var font = Resources.Load<Font>("Fonts/Bungee-Regular");
-            foreach (var size in new[] { new Vector2(540, 960), new Vector2(390, 844), new Vector2(1280, 720) })
+            foreach (bool mobile in new[] { false, true })
+            foreach (var screen in new[] { new Vector2(540, 960), new Vector2(390, 844), new Vector2(750, 1334),
+                new Vector2(1206, 2622), new Vector2(2622, 1206), new Vector2(1280, 720) })
             {
-                var row = GameSession.MainMenuLevelSelectRect(size.x, size.y);
+                float scale = GameSession.GuiScaleFor(mobile, screen.x, screen.y);
+                var size = screen / scale;
+                var row = GameSession.MainMenuLevelSelectRect(size.x, size.y, mobile);
                 var left = GameSession.MainMenuLevelSelectLeftButtonRect(row);
                 var right = GameSession.MainMenuLevelSelectRightButtonRect(row);
                 var value = GameSession.MainMenuLevelSelectValueRect(row);
@@ -409,9 +415,71 @@ namespace CandyCruisers.Editor
                     "Level select lays out as two square arrow buttons with a centered number slot");
                 var style = new GUIStyle { font = font, fontSize = Mathf.RoundToInt(row.height * .9f),
                     alignment = TextAnchor.MiddleCenter, wordWrap = false, padding = new RectOffset() };
+                while (style.fontSize > 12 && style.CalcSize(new GUIContent("99")).x > value.width) style.fontSize--;
                 Check(style.font == font && style.CalcSize(new GUIContent("99")).x <= value.width,
                     "Level number uses the title font and fits the selector slot");
+                Check(!mobile || left.width >= 44, "Phone selector buttons provide a generous square touch target");
+                var start = left.center + new Vector2(5, -8);
+                var end = left.center + new Vector2(-5, 0);
+                var transform = Matrix4x4.Scale(new Vector3(scale, scale, 1)) * GameSession.MenuLineTransform(start, end);
+                Check(Vector2.Distance(transform.MultiplyPoint3x4(Vector3.zero), start * scale) < .001f &&
+                    Vector2.Distance(transform.MultiplyPoint3x4(Vector3.right * Vector2.Distance(start, end)), end * scale) < .001f,
+                    "Arrow endpoints stay inside their button after the mobile interface scale is applied");
             }
+        }
+
+        private static void CheckLevelSelectTouches()
+        {
+            foreach (bool mobile in new[] { false, true })
+            foreach (var screen in new[] { new Vector2(540, 960), new Vector2(390, 844), new Vector2(750, 1334),
+                new Vector2(1206, 2622), new Vector2(2622, 1206), new Vector2(1280, 720) })
+            SpecialEnemyChecks.Fixture((grid, player, tongue) =>
+            {
+                var session = grid.gameObject.AddComponent<GameSession>();
+                try
+                {
+                    session.Configure(player);
+                    if (!Application.isPlaying) InvokeLifecycle(session, "OnEnable");
+                    PlayerPrefs.SetInt(GameSession.HighestReachedLevelKey, 7);
+                    InvokeLifecycle(session, "Start");
+                    session.Tick(GameSession.MenuWordIntroDuration);
+                    session.StartLevel = 2;
+                    float scale = GameSession.GuiScaleFor(mobile, screen.x, screen.y);
+                    var row = GameSession.MainMenuLevelSelectRect(screen.x / scale, screen.y / scale, mobile);
+                    var left = GameSession.MainMenuLevelSelectLeftButtonRect(row);
+                    var right = GameSession.MainMenuLevelSelectRightButtonRect(row);
+                    void Tap(Vector2 point)
+                    {
+                        var screenPoint = new Vector2(point.x * scale, screen.y - point.y * scale);
+                        Check(Vector2.Distance(GameSession.MenuPointFromScreen(screenPoint, screen, mobile), point) < .001f,
+                            "Touch pixels map to the same scaled coordinates used to draw the selector");
+                        typeof(GameSession).GetMethod("ActivateMainMenuTouch", System.Reflection.BindingFlags.NonPublic |
+                            System.Reflection.BindingFlags.Instance).Invoke(session, new object[] { screenPoint, screen, mobile });
+                    }
+                    Tap(right.center);
+                    Check(session.StartLevel == 3 && !session.MenuArriving, "Right arrow changes level without starting the game");
+                    Tap(left.center);
+                    Check(session.StartLevel == 2 && !session.MenuArriving, "Left arrow changes level without starting the game");
+                    foreach (var point in new[] { row.center, new Vector2(left.xMax + 2, row.center.y),
+                        new Vector2(right.xMin - 2, row.center.y) }) Tap(point);
+                    if (mobile) Tap(new Vector2(row.xMin - 6, row.center.y));
+                    Check(session.StartLevel == 2 && !session.MenuArriving,
+                        "Number, gaps and mobile touch padding consume taps without starting gameplay");
+                    session.StartLevel = 7;
+                    Tap(right.center);
+                    Check(session.StartLevel == 7 && !session.MenuArriving, "Upper level limit cannot fall through to start");
+                    session.StartLevel = 1;
+                    Tap(left.center);
+                    Check(session.StartLevel == 1 && !session.MenuArriving, "Lower level limit cannot fall through to start");
+                    Tap(new Vector2(row.center.x, row.yMax + 40));
+                    Check(session.MenuArriving, "A tap outside the selector still starts the selected game");
+                }
+                finally
+                {
+                    if (!Application.isPlaying) InvokeLifecycle(session, "OnDisable");
+                    UnityEngine.Object.DestroyImmediate(session);
+                }
+            });
         }
 
         private static void CheckMenuEyeTrackingDelay()
@@ -466,6 +534,7 @@ namespace CandyCruisers.Editor
                     .Select(MenuIntroAnimation.TitleTurnTime).ToArray();
                 float leftCenter = resting.width / 2 + 6;
                 float rightCenter = canvas.x - leftCenter;
+                float expectedDrop = 0;
                 for (int leg = 0; leg < corners.Length - 1; leg++)
                 {
                     float startBeat = (corners[leg] - MenuIntroAnimation.TitleFirstBeatSeconds) / MenuIntroAnimation.TitleBeatSeconds;
@@ -480,6 +549,13 @@ namespace CandyCruisers.Editor
                     bool vertical = Mathf.Abs(from.center.x - to.center.x) < .001f;
                     Check(leg % 2 == 0 ? vertical && !horizontal : horizontal && !vertical,
                         "The title strictly alternates vertical drops and horizontal sweeps without same-height reversals");
+                    if (vertical)
+                    {
+                        float drop = to.y - from.y;
+                        if (expectedDrop == 0) expectedDrop = drop;
+                        Check(Mathf.Abs(drop - expectedDrop) < .001f,
+                            "Every vertical title drop covers the same distance");
+                    }
                     if (horizontal && leg < corners.Length - 2)
                         Check(Mathf.Abs(Mathf.Min(from.center.x, to.center.x) - leftCenter) < .001f &&
                             Mathf.Abs(Mathf.Max(from.center.x, to.center.x) - rightCenter) < .001f,
@@ -656,6 +732,35 @@ namespace CandyCruisers.Editor
             Check(rect.yMax <= anchor - 144 + .01f,
                 "Main menu title clears the enemy preview row");
         }
+
+        private static void CheckPauseButtonPlatform()
+        {
+            SpecialEnemyChecks.Fixture((grid, player, tongue) =>
+            {
+                var session = grid.gameObject.AddComponent<GameSession>();
+                try
+                {
+                    session.Configure(player);
+                    if (!Application.isPlaying) InvokeLifecycle(session, "OnEnable");
+                    GameSession.ForceMobileMenuForTests = false;
+                    Check(!PauseButtonVisible(session), "Desktop builds hide the on-screen pause button");
+                    GameSession.ForceMobileMenuForTests = true;
+                    Check(PauseButtonVisible(session), "Touch builds keep the on-screen pause button");
+                    session.Pause();
+                    Check(!PauseButtonVisible(session), "The pause button disappears while the pause menu is already open");
+                }
+                finally
+                {
+                    GameSession.ForceMobileMenuForTests = false;
+                    if (session.IsPaused) session.Resume();
+                    UnityEngine.Object.DestroyImmediate(session);
+                }
+            });
+        }
+
+        private static bool PauseButtonVisible(GameSession session) => (bool)typeof(GameSession)
+            .GetProperty("PauseButtonVisible", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+            .GetValue(session);
 
         private static void Check(bool condition, string message)
         { if (!condition) throw new Exception("Menu check failed: " + message); }

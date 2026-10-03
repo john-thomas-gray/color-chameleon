@@ -31,6 +31,7 @@ namespace CandyCruisers.Editor
             foreach (bool magic in new[] { false, true }) CheckEarlyReturn(magic);
             CheckShieldReturn();
             CheckSlowReturn();
+            CheckMenuMusicSelection();
             CheckSeamlessMenuMusic();
             CheckGameplayMusic();
             CheckDeathMusic();
@@ -249,6 +250,48 @@ namespace CandyCruisers.Editor
             });
         }
 
+        private static void CheckMenuMusicSelection()
+        {
+            for (int attempt = 0; attempt < 3; attempt++)
+                SpecialEnemyChecks.Fixture((grid, player, tongue) =>
+                {
+                    var session = grid.gameObject.AddComponent<GameSession>();
+                    session.Configure(player);
+                    if (!Application.isPlaying) typeof(GameSession).GetMethod("OnEnable",
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(session, null);
+                    typeof(GameSession).GetMethod("Start", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                        .Invoke(session, null);
+                    var music = grid.GetComponent<GameplayMusicPlayer>();
+                    var disco = Resources.Load<AudioClip>("DiscoDescent");
+                    if (disco != null)
+                        Check(music.MenuTrack == disco && music.Source.clip == disco,
+                            "Every fresh menu starts with the temporary Disco Descent lock");
+                    if (!HasBundledSoundtrack()) return;
+
+                    var songs = new System.Collections.Generic.HashSet<string> { music.MenuTrack.name };
+                    for (int i = 1; i < music.TrackCount; i++)
+                    {
+                        Check(music.SkipCurrentSong() && songs.Add(music.Source.clip.name),
+                            "Menu skipping visits every other soundtrack song once before repeating");
+                        var selected = music.Source.clip;
+                        music.UpdatePlayback();
+                        Check(session.State == GameSession.RunState.MainMenu && !session.MenuArriving &&
+                            music.Source.clip == selected && music.MenuTrack == selected && music.Source.loop,
+                            "Skipping stays on the menu and the temporary lock does not undo the selected song");
+                    }
+                    var last = music.Source.clip;
+                    Check(music.SkipCurrentSong() && music.Source.clip != last,
+                        "Menu shuffle avoids immediate repeats at the bag boundary");
+                    Check(!session.HandleMenuKey(KeyCode.F8) && session.State == GameSession.RunState.MainMenu,
+                        "The music shortcut cannot activate the menu's start command");
+                    var carried = music.Source.clip;
+                    session.StartRun();
+                    Check(music.Source.clip == carried && music.Track == carried && !music.Source.loop,
+                        "Starting gameplay carries the song selected by the menu shortcut");
+                });
+            Debug.Log("Menu music checks passed: temporary Disco Descent start, shuffle skips, menu state and gameplay carryover.");
+        }
+
         private static void CheckSeamlessMenuMusic()
         {
             // Keep synchronous checks independent of background streaming; the runtime scene checks use the real recording.
@@ -337,7 +380,16 @@ namespace CandyCruisers.Editor
                                 "Each local soundtrack resource imports as playable audio");
                             songs.Add(selected.name);
                             music.Source.clip = selected;
-                            Check(music.CurrentTempo > 60 && music.CurrentTempo < 200, "Each playing track has independent measured beat metadata");
+                            var beatMapAsset = Resources.Load<TextAsset>("BeatMaps/" + selected.name);
+                            if (beatMapAsset != null)
+                            {
+                                Check(SongBeatMap.TryParse(beatMapAsset.text, selected.length, out var map) &&
+                                    music.UsesBeatMap && Mathf.Abs(music.CurrentTempo -
+                                        60f / map.DurationAtTime(music.PlaybackSeconds)) < .001f,
+                                    "Each mapped track uses its own measured beat interval: " + selected.name);
+                            }
+                            else Check(music.CurrentTempo > 60 && music.CurrentTempo < 200,
+                                "Each fixed-tempo track has independent measured beat metadata: " + selected.name);
                             if (i + 1 < music.TrackCount) music.SelectNextTrack();
                         }
                         Check(songs.Count == ActiveSoundtrack.Length &&
@@ -353,7 +405,8 @@ namespace CandyCruisers.Editor
                     }
                     else Check(music.Track == null && music.MenuTrack == null,
                         "Main stays music-free when no local soundtrack files are installed");
-                    Check(!music.SkipCurrentSong(), "Developer skip does not replace menu music outside gameplay");
+                    if (!HasBundledSoundtrack())
+                        Check(!music.SkipCurrentSong(), "Menu skipping stays unavailable without local soundtrack resources");
                     var serialized = new SerializedObject(music);
                     serialized.FindProperty("track").objectReferenceValue = clip;
                     serialized.FindProperty("menuTrack").objectReferenceValue = menuClip;
@@ -361,6 +414,8 @@ namespace CandyCruisers.Editor
                     music.UpdatePlayback();
                     Check(!music.InGameplayRun && music.ShouldPlayMusic && music.Source.clip == music.MenuTrack &&
                         music.MenuTrack != clip, "Main menu requests its selected soundtrack song, not the gameplay override");
+                    Check(!music.SkipCurrentSong() && music.Source.clip == menuClip,
+                        "Developer skip preserves an explicit menu-track override");
                     session.StartRun();
                     Check(session.State == GameSession.RunState.Refilling && music.InGameplayRun && music.ShouldPlayMusic,
                         "Starting a run requests gameplay music during the opening beat");

@@ -8,10 +8,11 @@ namespace CandyCruisers
         public const int MaxExtraLives = 2;
         public const int MaxLives = MaxExtraLives + 1;
         public const float HalfWidth = 3f;
+        public const float TouchFireScreenWidthFraction = .08f;
         [SerializeField, Min(0.1f)] private float speed = 5f;
         [SerializeField, Min(0.1f)] private float touchSpeed = 12f;
-        [SerializeField, Range(.03f, .25f), Tooltip("Shooting zone radius relative to the shorter screen dimension; extends downward below the player.")]
-        private float touchFireRadiusFraction = .12f;
+        [SerializeField, Range(.01f, .25f), Tooltip("Horizontal shooting range as a fraction of the current screen width.")]
+        private float touchFireScreenWidthFraction = TouchFireScreenWidthFraction;
         [SerializeField] private EnemyGrid grid;
         [SerializeField] private TongueShot tongue;
         [SerializeField] private SpriteRenderer body;
@@ -450,7 +451,9 @@ namespace CandyCruisers
 
         private void ShowPlayer(bool visible)
         {
-            foreach (var visual in GetComponentsInChildren<SpriteRenderer>()) visual.enabled = visible;
+            // Projectile visibility belongs to TongueShot, not respawn flashing.
+            foreach (var visual in GetComponentsInChildren<SpriteRenderer>())
+                if (visual.GetComponentInParent<TongueShot>() == null) visual.enabled = visible;
         }
 
         public void Configure(EnemyGrid enemyGrid, TongueShot shot, SpriteRenderer bodyRenderer)
@@ -658,7 +661,7 @@ namespace CandyCruisers
             touchPointer = isTouch;
             pointerDragging = false;
             nearTouchStart = IsTouchShootPosition(position, view.WorldToScreenPoint(transform.position),
-                Mathf.Min(view.pixelWidth, view.pixelHeight) * touchFireRadiusFraction, TouchShootUpperScreenY());
+                CurrentTouchFireRangePixels(), TouchShootUpperScreenY());
             movingToTarget = false;
             pointerStart = position;
             pointerTime = Time.unscaledTime;
@@ -677,6 +680,10 @@ namespace CandyCruisers
         }
         public static bool IsTap(float duration, float travel, float screenShortSide) =>
             duration <= 0.3f && travel <= screenShortSide * 0.025f;
+        public static float TouchFireRangePixels(float screenWidth) =>
+            TouchFireRangePixels(screenWidth, TouchFireScreenWidthFraction);
+        public static float TouchFireRangePixels(float screenWidth, float screenWidthFraction) =>
+            Mathf.Max(0, screenWidth) * Mathf.Max(0, screenWidthFraction);
         public static bool IsTouchShootPosition(Vector2 position, Vector2 playerPosition, float radius) =>
             IsTouchShootPosition(position, playerPosition, radius, float.PositiveInfinity);
         public static bool IsTouchShootPosition(Vector2 position, Vector2 playerPosition, float radius, float upperScreenY)
@@ -689,6 +696,11 @@ namespace CandyCruisers
         {
             if (grid == null || view == null) return float.PositiveInfinity;
             return view.WorldToScreenPoint(grid.transform.TransformPoint(grid.CellPosition(0, 0))).y;
+        }
+        private float CurrentTouchFireRangePixels()
+        {
+            float screenWidth = view != null && view.pixelWidth > 0 ? view.pixelWidth : Screen.width;
+            return TouchFireRangePixels(screenWidth, touchFireScreenWidthFraction);
         }
         public void EndPointer(Vector2 position, bool canceled)
         {
@@ -736,7 +748,7 @@ namespace CandyCruisers
                 fireX = Mathf.Clamp(world.x, -HalfWidth + .01f, HalfWidth - .01f);
                 return true;
             }
-            float radius = view != null ? Mathf.Min(view.pixelWidth, view.pixelHeight) * touchFireRadiusFraction : 0;
+            float radius = view != null ? CurrentTouchFireRangePixels() : 0;
             if (IsTouchShootPosition(screenPosition, view.WorldToScreenPoint(transform.position), radius, TouchShootUpperScreenY()))
                 return true;
             return false;

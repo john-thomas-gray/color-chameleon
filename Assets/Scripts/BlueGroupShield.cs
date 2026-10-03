@@ -7,10 +7,14 @@ namespace CandyCruisers
     {
         private struct Edge
         {
+            public Vector2Int From, To;
             public Vector3 A, B;
             public int Owner;
+            public bool Traced;
         }
         private readonly List<Edge> edges = new List<Edge>();
+        private readonly List<List<int>> contours = new List<List<int>>();
+        private int contourCount;
         private Mesh band;
         private MeshRenderer bandRenderer;
         private readonly List<Vector3> vertices = new List<Vector3>();
@@ -18,11 +22,13 @@ namespace CandyCruisers
         private readonly List<int> triangles = new List<int>();
         private readonly HashSet<int> protectedIds = new HashSet<int>();
         public int EdgeCount => edges.Count;
+        public int ContourCount => contourCount;
         public bool Protects(int id) => protectedIds.Contains(id);
 
         public void Refresh(EnemyGrid grid)
         {
             edges.Clear();
+            contourCount = 0;
             protectedIds.Clear();
             var visited = new HashSet<int>();
             for (int row = 0; row < GridModel.Rows; row++)
@@ -40,6 +46,7 @@ namespace CandyCruisers
                     if (enemy.IsSpecial && ability != null && ability.isActiveAndEnabled && ability.ShieldActive) source = member.Id;
                 }
                 if (source == 0) continue;
+                int firstEdge = edges.Count;
                 foreach (var member in group)
                 {
                     protectedIds.Add(member.Id);
@@ -50,11 +57,13 @@ namespace CandyCruisers
                     var bl = center + new Vector3(-half, -half, 0);
                     var br = center + new Vector3(half, -half, 0);
                     bool BlueAt(int x, int y) => grid.Model.At(x, y)?.Color == EnemyColor.Blue;
-                    if (!BlueAt(member.Column, member.Row - 1)) AddEdge(tl, tr, source);
-                    if (!BlueAt(member.Column + 1, member.Row)) AddEdge(tr, br, source);
-                    if (!BlueAt(member.Column, member.Row + 1)) AddEdge(br, bl, source);
-                    if (!BlueAt(member.Column - 1, member.Row)) AddEdge(bl, tl, source);
+                    int cellColumn = member.Column, cellRow = member.Row;
+                    if (!BlueAt(cellColumn, cellRow - 1)) AddEdge(new Vector2Int(cellColumn, cellRow), new Vector2Int(cellColumn + 1, cellRow), tl, tr, source);
+                    if (!BlueAt(cellColumn + 1, cellRow)) AddEdge(new Vector2Int(cellColumn + 1, cellRow), new Vector2Int(cellColumn + 1, cellRow + 1), tr, br, source);
+                    if (!BlueAt(cellColumn, cellRow + 1)) AddEdge(new Vector2Int(cellColumn + 1, cellRow + 1), new Vector2Int(cellColumn, cellRow + 1), br, bl, source);
+                    if (!BlueAt(cellColumn - 1, cellRow)) AddEdge(new Vector2Int(cellColumn, cellRow + 1), new Vector2Int(cellColumn, cellRow), bl, tl, source);
                 }
+                TraceContours(firstEdge, edges.Count);
             }
             foreach (var enemy in grid.GetComponentsInChildren<GridEnemy>())
                 enemy.GetComponent<EnemyAbilities>()?.SetGroupShielded(Protects(enemy.Id));
@@ -71,23 +80,41 @@ namespace CandyCruisers
             }
             if (band == null) return;
             vertices.Clear(); colors.Clear(); triangles.Clear();
-            foreach (var edge in edges)
+            for (int contourIndex = 0; contourIndex < contourCount; contourIndex++)
             {
-                var direction = (edge.B - edge.A).normalized;
-                var inward = new Vector3(direction.y, -direction.x, 0);
-                int start = vertices.Count;
+                var contour = contours[contourIndex];
+                int cornerCount = contour.Count;
+                int firstVertex = vertices.Count;
+                if (cornerCount < 4) continue;
                 for (int strip = 0; strip <= 8; strip++)
                 {
                     float t = strip / 8f;
-                    var offset = inward * Mathf.Lerp(-.0175f, .21f, t);
-                    vertices.Add(edge.A - direction * .0175f + offset);
-                    vertices.Add(edge.B + direction * .0175f + offset);
+                    float inset = Mathf.Lerp(-.0175f, .21f, t);
                     var tint = new Color(.82f, 1, 1, 1 - Mathf.SmoothStep(0, 1, t));
-                    colors.Add(tint); colors.Add(tint);
-                    if (strip == 8) continue;
-                    int v = start + strip * 2;
-                    triangles.Add(v); triangles.Add(v + 1); triangles.Add(v + 2);
-                    triangles.Add(v + 1); triangles.Add(v + 3); triangles.Add(v + 2);
+                    for (int corner = 0; corner < cornerCount; corner++)
+                    {
+                        var previous = edges[contour[(corner + cornerCount - 1) % cornerCount]];
+                        var next = edges[contour[corner]];
+                        Vector3 previousDirection = (previous.B - previous.A).normalized;
+                        Vector3 nextDirection = (next.B - next.A).normalized;
+                        vertices.Add(OffsetCorner(next.A, previousDirection, nextDirection, inset));
+                        colors.Add(tint);
+                    }
+                }
+                for (int strip = 0; strip < 8; strip++)
+                {
+                    int outer = firstVertex + strip * cornerCount;
+                    int inner = outer + cornerCount;
+                    for (int corner = 0; corner < cornerCount; corner++)
+                    {
+                        int nextCorner = (corner + 1) % cornerCount;
+                        int a = outer + corner;
+                        int b = outer + nextCorner;
+                        int c = inner + corner;
+                        int d = inner + nextCorner;
+                        triangles.Add(a); triangles.Add(b); triangles.Add(c);
+                        triangles.Add(b); triangles.Add(d); triangles.Add(c);
+                    }
                 }
             }
             band.Clear();
@@ -102,7 +129,77 @@ namespace CandyCruisers
             if (Application.isPlaying) Destroy(band); else DestroyImmediate(band);
         }
 
-        private void AddEdge(Vector3 a, Vector3 b, int owner) => edges.Add(new Edge { A = a, B = b, Owner = owner });
+        private void AddEdge(Vector2Int from, Vector2Int to, Vector3 a, Vector3 b, int owner) =>
+            edges.Add(new Edge { From = from, To = to, A = a, B = b, Owner = owner });
+
+        private void TraceContours(int firstEdge, int endEdge)
+        {
+            for (int startEdge = firstEdge; startEdge < endEdge; startEdge++)
+            {
+                if (edges[startEdge].Traced) continue;
+                var contour = contourCount < contours.Count ? contours[contourCount] : new List<int>();
+                contour.Clear();
+                Vector2Int start = edges[startEdge].From;
+                int current = startEdge;
+                bool closed = false;
+                for (int remaining = endEdge - firstEdge + 1; remaining > 0; remaining--)
+                {
+                    var edge = edges[current];
+                    if (edge.Traced) break;
+                    edge.Traced = true;
+                    edges[current] = edge;
+                    contour.Add(current);
+                    if (edge.To == start)
+                    {
+                        closed = true;
+                        break;
+                    }
+                    current = FindNextEdge(edge.To, edge.To - edge.From, firstEdge, endEdge);
+                    if (current < 0) break;
+                }
+                if (!closed || contour.Count < 4) continue;
+                if (contourCount == contours.Count) contours.Add(contour);
+                contourCount++;
+            }
+        }
+
+        private int FindNextEdge(Vector2Int vertex, Vector2Int incoming, int firstEdge, int endEdge)
+        {
+            int selected = -1;
+            int bestPriority = int.MaxValue;
+            for (int i = firstEdge; i < endEdge; i++)
+            {
+                var candidate = edges[i];
+                if (candidate.Traced || candidate.From != vertex) continue;
+                int incomingDirection = DirectionIndex(incoming);
+                int outgoingDirection = DirectionIndex(candidate.To - candidate.From);
+                int turn = (outgoingDirection - incomingDirection + 4) % 4;
+                int priority = turn == 1 ? 0 : turn == 0 ? 1 : turn == 3 ? 2 : 3;
+                if (priority >= bestPriority) continue;
+                bestPriority = priority;
+                selected = i;
+            }
+            return selected;
+        }
+
+        private static int DirectionIndex(Vector2Int direction)
+        {
+            if (direction.x > 0) return 0;
+            if (direction.y > 0) return 1;
+            if (direction.x < 0) return 2;
+            return 3;
+        }
+
+        private static Vector3 OffsetCorner(Vector3 point, Vector3 previous, Vector3 next, float inset)
+        {
+            var previousNormal = new Vector3(previous.y, -previous.x, 0);
+            var nextNormal = new Vector3(next.y, -next.x, 0);
+            var miter = previousNormal + nextNormal;
+            if (miter.sqrMagnitude < .000001f) return point + nextNormal * inset;
+            miter.Normalize();
+            float scale = inset / Vector3.Dot(miter, nextNormal);
+            return point + miter * scale;
+        }
 
         public bool FindHit(Vector3 origin, float from, float to, float radius, out int id, out float distance)
         {

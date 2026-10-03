@@ -186,6 +186,9 @@ namespace CandyCruisers.Editor
                 foreach (var ability in grid.GetComponentsInChildren<EnemyAbilities>()) ability.Tick(1.15f);
                 grid.RefreshSpecials();
                 Check(grid.GroupShield.EdgeCount == 8, "Three-cell line has only its exterior perimeter after power-up");
+                var perimeter = grid.GetComponentInChildren<MeshFilter>().sharedMesh;
+                Check(grid.GroupShield.ContourCount == 1 && perimeter.vertexCount == grid.GroupShield.EdgeCount * 9,
+                    "Horizontal perimeter joins share vertices instead of overlapping edge ends");
                 player.transform.position = new Vector3(a.transform.position.x, -4.6f, 0);
                 tongue.TryFire(EnemyColor.Red, 10, true);
                 tongue.Tick(1, grid);

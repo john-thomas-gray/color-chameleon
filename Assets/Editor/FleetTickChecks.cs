@@ -62,11 +62,18 @@ namespace CandyCruisers.Editor
                 visual.MovementPulse();
                 Check(green.Visuals.Body.color != resting, "Selected Green visibly flashes");
                 var bolts = green.GetComponentsInChildren<LineRenderer>().Where(line => line.name.StartsWith("Green surge")).ToArray();
-                Check(bolts.Length == 10 && bolts.All(line => line.enabled && !line.useWorldSpace),
-                    "Green surge has a corona and four branches with bright cores that follow the enemy");
+                Check(bolts.Length == 16 && bolts.All(line => line.enabled && !line.useWorldSpace),
+                    "Green surge has a corona, four branches and three bright arrow bolts that follow the enemy");
+                var arrows = green.GetComponentsInChildren<LineRenderer>()
+                    .Where(line => line.name.StartsWith("Green surge arrow core")).ToArray();
+                Check(arrows.Length == 3 && arrows.All(line => line.GetPosition(2).x > line.GetPosition(0).x),
+                    "Rightward Green pulse draws clear arrowheads pointing with fleet motion");
                 Vector3 point = bolts[0].GetPosition(1);
                 visual.Tick(.06f, EnemyColor.Green, 0);
                 Check(bolts[0].GetPosition(1) != point, "Electricity changes shape during the pulse");
+                visual.MovementPulse(-1);
+                Check(arrows.All(line => line.GetPosition(2).x < line.GetPosition(0).x),
+                    "Leftward Green pulse flips the arrowheads with fleet motion");
                 visual.Tick(EnemyPresentation.MovementPulseSeconds, EnemyColor.Green, 0);
                 Check(bolts.All(line => !line.enabled), "Electrical arcs disappear after the pulse");
                 Check(green.Visuals.Body.color == resting, "Pulse returns to original color without changing geometry");

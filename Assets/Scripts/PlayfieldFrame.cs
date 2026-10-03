@@ -13,6 +13,9 @@ namespace CandyCruisers
         private static readonly EnemyColor[] Colors = (EnemyColor[])System.Enum.GetValues(typeof(EnemyColor));
         private readonly EnemyColor[] earnedColors = new EnemyColor[Colors.Length];
         public const float SpawnPulseSeconds = 60f / GameplayMusicPlayer.DefaultBeatsPerMinute;
+        public const float OuterTopY = 5.62f;
+        public const float BoundaryLineWidth = .045f;
+        public const float OutlineLineWidth = .018f;
         private GameSession subscribedSession;
         private float spawnPulseDuration = SpawnPulseSeconds;
         private float spawnPulseRemaining;
@@ -31,8 +34,8 @@ namespace CandyCruisers
             player = controller;
             BindSession();
             boundary = GetComponent<LineRenderer>();
-            outline = Line("Cabinet outline", .018f, true);
-            float x = PlayerMovement.HalfWidth + .12f, y = 5.62f, bevel = .18f;
+            outline = Line("Cabinet outline", OutlineLineWidth, true);
+            float x = PlayerMovement.HalfWidth + .12f, y = OuterTopY, bevel = .18f;
             outline.positionCount = 8;
             outline.SetPositions(new[] {
                 new Vector3(-x + bevel, -y), new Vector3(x - bevel, -y),
@@ -158,8 +161,8 @@ namespace CandyCruisers
 
         private void ApplyTint(Color color)
         {
-            boundary.startWidth = boundary.endWidth = .045f;
-            if (outline != null) outline.startWidth = outline.endWidth = .018f;
+            boundary.startWidth = boundary.endWidth = BoundaryLineWidth;
+            if (outline != null) outline.startWidth = outline.endWidth = OutlineLineWidth;
             Tint(boundary, color, .85f);
             Tint(outline, color, .5f);
             foreach (var corner in corners)

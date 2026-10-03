@@ -8,6 +8,8 @@ namespace CandyCruisers
         public const string DefaultResourceName = "DiscoDescent";
         public const string MenuResourceName = "AnotherJoe";
         public const string CountingResourceName = "CountingMetronome";
+        // Temporary menu-start lock; set to an empty string to restore random starts.
+        private const string TemporaryMenuStartResourceName = "DiscoDescent";
         public const int BeatsPerMeasure = 4;
         // Measure alignment is separate from the individual-beat clock.
         public const int DownbeatOffsetBeats = 1;
@@ -44,6 +46,7 @@ namespace CandyCruisers
         private int songIndex = -1;
         private bool pausedSource;
         private bool wasInMainMenu;
+        private bool menuShuffleStarted;
         private AudioClip carriedMenuTrack;
         public int TrackCount => soundtrack.Length;
         [SerializeField, Range(0, 11)] private int customTrackRelativeMajorTonic;
@@ -187,6 +190,10 @@ namespace CandyCruisers
             if (soundtrack.Length > 0)
             {
                 int start = shuffle.Next(soundtrack.Length);
+                int lockedIndex = System.Array.FindIndex(soundtrack,
+                    song => song.resourceName == TemporaryMenuStartResourceName);
+                if (lockedIndex >= 0 && Resources.Load<AudioClip>(soundtrack[lockedIndex].resourceName) != null)
+                    start = lockedIndex;
                 for (int offset = 0; offset < soundtrack.Length; offset++)
                 {
                     int index = (start + offset) % soundtrack.Length;
@@ -240,9 +247,20 @@ namespace CandyCruisers
         }
         public bool SkipCurrentSong()
         {
-            if (!(Application.isEditor || Debug.isDebugBuild) || !InGameplayRun || track != null || soundtrack.Length < 2) return false;
+            if (!(Application.isEditor || Debug.isDebugBuild) || session == null ||
+                session.OpeningWarningActive || soundtrack.Length < 2) return false;
+            bool inMenu = session.State == GameSession.RunState.MainMenu;
+            if (inMenu ? menuTrack != null : !InGameplayRun || track != null) return false;
+            if (inMenu && !menuShuffleStarted)
+            {
+                songIndex = System.Array.FindIndex(soundtrack, song => song.resourceName == MenuTrack?.name);
+                RefillShuffleBag();
+                remainingSongs.Remove(songIndex);
+                menuShuffleStarted = true;
+            }
             carriedMenuTrack = null;
             if (!TrySelectNextResourceTrack()) return false;
+            if (inMenu) resourceMenuTrack = resourceTrack;
             UpdatePlayback();
             return true;
         }

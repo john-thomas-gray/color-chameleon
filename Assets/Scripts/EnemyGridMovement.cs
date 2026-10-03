@@ -179,7 +179,7 @@ namespace CandyCruisers
             int next = greenOrder[0];
             greenOrder.RemoveAt(0);
             pulsedGreens.Add(next);
-            grid.View(next)?.GetComponent<EnemyPresentation>()?.MovementPulse();
+            grid.View(next)?.GetComponent<EnemyPresentation>()?.MovementPulse(Direction);
             GreenPulsed?.Invoke(next);
         }
 

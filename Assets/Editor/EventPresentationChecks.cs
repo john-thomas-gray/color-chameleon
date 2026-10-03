@@ -89,6 +89,8 @@ namespace CandyCruisers.Editor
                 Check(mesh.colors.Any(c => c.a == 1) && mesh.colors.Any(c => c.a == 0) &&
                     mesh.colors.Any(c => c.a > 0 && c.a < 1), "Group shield has a solid rim and transparent inward taper");
                 Check(grid.GroupShield.EdgeCount == 8, "Group shield retains the original collision outline");
+                Check(grid.GroupShield.ContourCount == 1 && mesh.vertexCount == grid.GroupShield.EdgeCount * 9,
+                    "Corner turns share miter vertices so the shield perimeter has no open wedges");
                 var red = ProgressionChecks.Add(grid, EnemyColor.Red, 0, 0);
                 var presentation = red.GetComponent<EnemyPresentation>();
                 var original = red.Visuals.Body.transform.localScale;

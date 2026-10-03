@@ -46,15 +46,15 @@ namespace CandyCruisers.Editor
             Check(weighted.RegisterClear(2, true, 3) == 10300 && weighted.Level == 2 && weighted.Defeated == 20,
                 "Weighted clear uses pre-clear level and leaves fleet bonus unmultiplied");
             var progressBar = new Rect(10, 20, 100, 9);
-            Check(Mathf.Abs(GameSession.LevelProgressBaseHeight - 9f * 1.35f) < .001f,
-                "Level progress bar is 35 percent taller than the old nine-pixel bar");
+            Check(Mathf.Abs(GameSession.LevelProgressBaseHeight - 9f * 1.5f) < .001f,
+                "Level progress bar is 50 percent taller than the old nine-pixel bar");
             foreach (var screen in new[] { new Vector3(960, 540, 0), new Vector3(1179, 2556, 1) })
             {
                 float scale = GameSession.GuiScaleFor(screen.z > 0, screen.x, screen.y);
                 float oldPixels = 9f * scale;
                 float newPixels = GameSession.LevelProgressBaseHeight * scale;
-                Check(Mathf.Abs(newPixels / oldPixels - 1.35f) < .001f,
-                    "Level progress bar keeps the 35 percent height increase on desktop and iPhone-sized canvases");
+                Check(Mathf.Abs(newPixels / oldPixels - 1.5f) < .001f,
+                    "Level progress bar keeps the 50 percent height increase on desktop and iPhone-sized canvases");
             }
             Check(Mathf.Abs(GameSession.LevelProgressFillRect(progressBar, 2).width - progressBar.width) < .001f &&
                 Mathf.Abs(GameSession.LevelProgressBankedRect(progressBar, .35f).width - 35) < .001f,

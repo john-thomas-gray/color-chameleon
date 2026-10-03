@@ -27,8 +27,8 @@ namespace CandyCruisers
             TitleSeconds
         };
         private static readonly Vector2[] Turns = {
-            new Vector2(1, 0), new Vector2(1, .22f), new Vector2(-1, .22f),
-            new Vector2(-1, .49f), new Vector2(1, .49f), new Vector2(1, 1), new Vector2(0, 1)
+            new Vector2(1, 0), new Vector2(1, 1f / 3f), new Vector2(-1, 1f / 3f),
+            new Vector2(-1, 2f / 3f), new Vector2(1, 2f / 3f), new Vector2(1, 1), new Vector2(0, 1)
         };
         public static int TitleTurnCount => TurnTimes.Length;
         public static float TitleTurnTime(int index) => TurnTimes[Mathf.Clamp(index, 0, TurnTimes.Length - 1)];

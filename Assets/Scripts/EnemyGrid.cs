@@ -387,13 +387,22 @@ namespace CandyCruisers
             return cleared.Count;
         }
 
-        public bool CompleteImitation(int id)
+        public bool CompleteImitation(int id) => CompleteImitation(id, out _);
+
+        public bool CompleteImitation(int id, out List<int> joinedGroup)
         {
+            joinedGroup = new List<int>();
             if (!Model.TryGetImitationTarget(id, out var target)) return false;
             if (!SetColor(id, target.Color)) return false;
+            foreach (var member in Model.ColorGroup(id)) joinedGroup.Add(member.Id);
             // Conversion is not a kill: no reward, clear bar, or spawn exclusion.
             if (Model.ColorCount(EnemyColor.Yellow) == 0) LastYellowTransformed?.Invoke();
             return true;
+        }
+
+        public void BeginYellowGroupPulse(IEnumerable<int> joinedGroup, float arrivalSeconds, float returnSeconds)
+        {
+            YellowGroupPulse.Ensure(this).Begin(this, joinedGroup, arrivalSeconds, returnSeconds);
         }
 
         public bool FindMatchingHit(Vector3 origin, float fromLength, float toLength,

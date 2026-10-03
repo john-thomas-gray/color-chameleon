@@ -84,8 +84,7 @@ namespace CandyCruisers
             if (jelly) EnsureDome(lean);
             var rect = Fit(frame);
             var matrix = GUI.matrix; var tint = GUI.color;
-            GUIUtility.RotateAroundPivot(rotation, rect.center);
-            GUIUtility.ScaleAroundPivot(new Vector2(1 / Mathf.Sqrt(verticalScale), verticalScale), new Vector2(rect.center.x, rect.yMax));
+            GUI.matrix = AnimatedGuiMatrix(matrix, rect, rotation, verticalScale);
             try
             {
                 foreach (var piece in pieces)
@@ -106,6 +105,19 @@ namespace CandyCruisers
                 }
             }
             finally { GUI.matrix = matrix; GUI.color = tint; }
+        }
+
+        public static Matrix4x4 AnimatedGuiMatrix(Matrix4x4 baseMatrix, Rect rect, float rotation, float verticalScale)
+        {
+            float safeScale = Mathf.Max(.0001f, verticalScale);
+            var center = new Vector3(rect.center.x, rect.center.y, 0);
+            var feet = new Vector3(rect.center.x, rect.yMax, 0);
+            var rotate = Matrix4x4.Translate(center) * Matrix4x4.Rotate(Quaternion.Euler(0, 0, rotation)) *
+                Matrix4x4.Translate(-center);
+            var scale = Matrix4x4.Translate(feet) *
+                Matrix4x4.Scale(new Vector3(1 / Mathf.Sqrt(safeScale), safeScale, 1)) *
+                Matrix4x4.Translate(-feet);
+            return baseMatrix * rotate * scale;
         }
 
         private void EnsureDome(float lean)

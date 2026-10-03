@@ -239,7 +239,52 @@ namespace CandyCruisers.Editor
                 Check(yellow.Color == EnemyColor.Yellow && !ability.IsTransforming && !grid.IsColorCleared(EnemyColor.Yellow),
                     "Losing an attachment outside combat safely cancels conversion");
             });
-            Debug.Log("Yellow transformation checks passed: two-way linked kills, multiple attachments, kill-only rewards, conversion penalty, suspension and respawning.");
+
+            WithFixture((grid, player, spawner) =>
+            {
+                var yellow = Add(grid, EnemyColor.Yellow, 0, 0);
+                var yellowSprite = yellow.Visuals.Body.sprite;
+                var blue = Add(grid, EnemyColor.Blue, 1, 0);
+                Add(grid, EnemyColor.Blue, 2, 0);
+                var ability = yellow.GetComponent<EnemyAbilities>();
+                var presentation = yellow.GetComponent<EnemyPresentation>();
+                Check(ability.BeginImitation(blue), "Start conversion with a joined group");
+                ability.Tick(EnemyAbilities.ImitationSeconds);
+                var pulse = grid.GetComponent<YellowGroupPulse>();
+                Check(yellow.Color == EnemyColor.Blue && presentation.YellowRevealReturnActive &&
+                    pulse != null && pulse.ActivePulseCount == 1 && pulse.EdgeCount == 8,
+                    "Completed conversion starts one Yellow outline around the full joined group");
+                var overlay = yellow.Visuals.Root.Find("Imitation overlay").GetComponent<SpriteRenderer>();
+                Check(overlay.enabled && overlay.sprite == yellowSprite &&
+                    Vector4.Distance(yellow.Visuals.Body.color, EnemyPalette.Get(EnemyColor.Yellow)) < .0001f,
+                    "The converted enemy is revealed as Yellow when the pulse begins");
+                float beat = AbilityBeatClock.DefaultBeatSeconds;
+                float startingAlpha = pulse.MaxAlpha;
+                pulse.Tick(beat * .5f);
+                ability.Tick(beat * .5f);
+                Check(pulse.MaxAlpha > startingAlpha && pulse.MaxAlpha < 1 && overlay.color.a > 0 && overlay.color.a < 1,
+                    "The Yellow pulse and reveal come in over the first beat");
+                pulse.Tick(beat * .5f);
+                ability.Tick(beat * .5f);
+                Check(pulse.MaxAlpha > .99f && overlay.color.a > .99f,
+                    "The Yellow pulse reaches full strength after one beat");
+                pulse.Tick(beat);
+                ability.Tick(beat);
+                Check(pulse.MaxAlpha > 0 && pulse.MaxAlpha < 1 && overlay.color.a > 0 && overlay.color.a < 1 &&
+                    Vector4.Distance(yellow.Visuals.Body.color, EnemyPalette.Get(EnemyColor.Blue)) > .0001f,
+                    "The outline and Yellow reveal fade while the enemy changes back to its mimic");
+                pulse.Tick(beat);
+                ability.Tick(beat);
+                Check(pulse.ActivePulseCount == 0,
+                    $"After three beats the pulse is gone (remaining pulses: {pulse.ActivePulseCount}, alpha: {pulse.MaxAlpha})");
+                Check(!overlay.enabled,
+                    $"After three beats the Yellow overlay is gone (enabled: {overlay.enabled}, alpha: {overlay.color.a})");
+                Check(!presentation.YellowRevealReturnActive,
+                    $"After three beats the Yellow reveal has ended (active: {presentation.YellowRevealReturnActive})");
+                Check(Vector4.Distance(yellow.Visuals.Body.color, EnemyPalette.Get(EnemyColor.Blue)) < .0001f,
+                    $"After three beats the mimic color is restored (actual: {yellow.Visuals.Body.color}, expected: {EnemyPalette.Get(EnemyColor.Blue)})");
+            });
+            Debug.Log("Yellow transformation checks passed: two-way linked kills, multiple attachments, kill-only rewards, conversion penalty, suspension, respawning and joined-group pulse timing.");
         }
 
         private static GridEnemy Add(EnemyGrid grid, EnemyColor color, int column, int row) => ProgressionChecks.Add(grid, color, column, row);

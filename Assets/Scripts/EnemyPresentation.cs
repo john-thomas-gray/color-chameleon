@@ -34,13 +34,20 @@ namespace CandyCruisers
         private EnemyColor imitationColor;
         private bool linkedImitation;
         private float revealRemaining;
+        private Sprite yellowRevealSprite;
+        private EnemyColor yellowRevealColor;
+        private float yellowRevealAge, yellowRevealArrivalSeconds, yellowRevealReturnSeconds;
+        public bool YellowRevealReturnActive => yellowRevealSprite != null &&
+            yellowRevealAge + .0001f < yellowRevealArrivalSeconds + yellowRevealReturnSeconds;
         private float movementPulseRemaining;
+        private int movementPulseDirection = 1;
         public const float MovementPulseSeconds = .38f;
-        private LineRenderer[] surgeGlow, surgeCore;
-        public void MovementPulse()
+        private LineRenderer[] surgeGlow, surgeCore, surgeArrowGlow, surgeArrowCore;
+        public void MovementPulse(int direction = 1)
         {
             if (body == null) return;
             EnsureSurge();
+            movementPulseDirection = direction < 0 ? -1 : 1;
             movementPulseRemaining = MovementPulseSeconds;
             Tick(0, EnemyColor.Green, 0);
         }
@@ -81,6 +88,8 @@ namespace CandyCruisers
         }
         public void BeginImitation(GridEnemy neighbor, Sprite previousSprite, bool linked = true)
         {
+            yellowRevealAge = yellowRevealArrivalSeconds + yellowRevealReturnSeconds;
+            yellowRevealSprite = null;
             linkedImitation = linked;
             feedingImitation = !linked;
             target = neighbor;
@@ -97,6 +106,23 @@ namespace CandyCruisers
             feedingImitation = imitationRemaining > 0;
             if (feedingImitation) EnsureFeedingTendrils();
             if (tendril != null) tendril.enabled = false;
+        }
+        public void BeginYellowRevealReturn(Sprite yellowSprite, EnemyColor mimickedColor,
+            float arrivalSeconds, float returnSeconds)
+        {
+            if (body == null || yellowSprite == null) return;
+            yellowRevealSprite = yellowSprite;
+            yellowRevealColor = mimickedColor;
+            yellowRevealArrivalSeconds = Mathf.Max(.01f, arrivalSeconds);
+            yellowRevealReturnSeconds = Mathf.Max(.01f, returnSeconds);
+            yellowRevealAge = 0;
+            linkedImitation = false;
+            feedingImitation = false;
+            imitationRemaining = 0;
+            target = null;
+            if (tendril != null) tendril.enabled = false;
+            if (feedingTendrils != null) foreach (var line in feedingTendrils) line.enabled = false;
+            Tick(0, mimickedColor, 0);
         }
         public void RevealDisguise() => revealRemaining = .5f;
         public void Configure(SpriteRenderer renderer)
@@ -153,6 +179,8 @@ namespace CandyCruisers
             shiftRemaining = Mathf.Max(0, shiftRemaining - seconds);
             imitationRemaining = Mathf.Max(0, imitationRemaining - seconds);
             revealRemaining = Mathf.Max(0, revealRemaining - seconds);
+            if (YellowRevealReturnActive) yellowRevealAge = Mathf.Min(
+                yellowRevealArrivalSeconds + yellowRevealReturnSeconds, yellowRevealAge + Mathf.Max(0, seconds));
             movementPulseRemaining = Mathf.Max(0, movementPulseRemaining - seconds);
             dashRemaining = Mathf.Max(0, dashRemaining - seconds);
             PresentDash();
@@ -223,7 +251,31 @@ namespace CandyCruisers
             if (revealRemaining > 0)
                 body.color = Color.Lerp(EnemyPalette.Get(EnemyColor.Yellow), Color.white,
                     .5f + .5f * Mathf.Cos((.5f - revealRemaining) * Mathf.PI * 12));
+            PresentYellowRevealReturn();
             PresentFeedingTendrils(assimilation);
+        }
+
+        private void PresentYellowRevealReturn()
+        {
+            if (imitation == null || imitationRemaining > 0) return;
+            imitation.enabled = false;
+            if (!YellowRevealReturnActive) return;
+            float restore = Mathf.Clamp01((yellowRevealAge - yellowRevealArrivalSeconds) /
+                Mathf.Max(.01f, yellowRevealReturnSeconds));
+            float settled = Mathf.SmoothStep(0, 1, restore);
+            var yellow = EnemyPalette.Get(EnemyColor.Yellow);
+            var destination = EnemyPalette.Get(yellowRevealColor);
+            body.color = Color.Lerp(yellow, destination, settled);
+            imitation.enabled = true;
+            imitation.sprite = yellowRevealSprite;
+            float size = body.sprite != null && yellowRevealSprite != null ?
+                body.sprite.bounds.size.x / yellowRevealSprite.bounds.size.x : 1;
+            float arrival = Mathf.SmoothStep(0, 1, Mathf.Clamp01(yellowRevealAge /
+                Mathf.Max(.01f, yellowRevealArrivalSeconds)));
+            float alpha = yellowRevealAge <= yellowRevealArrivalSeconds ? arrival : 1 - settled;
+            imitation.transform.localScale = Vector3.one * size *
+                Mathf.Lerp(1.16f, 1, Mathf.Min(1, arrival + settled));
+            imitation.color = new Color(yellow.r, yellow.g, yellow.b, alpha);
         }
         private void PresentDash()
         {
@@ -303,6 +355,16 @@ namespace CandyCruisers
                 surgeGlow[i].useWorldSpace = surgeCore[i].useWorldSpace = false;
                 surgeCore[i].sortingOrder++;
             }
+            surgeArrowGlow = new LineRenderer[3];
+            surgeArrowCore = new LineRenderer[3];
+            for (int i = 0; i < surgeArrowGlow.Length; i++)
+            {
+                surgeArrowGlow[i] = Line("Green surge arrow glow " + i, 6, .13f);
+                surgeArrowCore[i] = Line("Green surge arrow core " + i, 6, .044f);
+                surgeArrowGlow[i].useWorldSpace = surgeArrowCore[i].useWorldSpace = false;
+                surgeArrowGlow[i].sortingOrder++;
+                surgeArrowCore[i].sortingOrder = surgeArrowGlow[i].sortingOrder + 1;
+            }
         }
 
         private void PresentMovementSurge(EnemyColor color)
@@ -345,6 +407,47 @@ namespace CandyCruisers
                     core.SetPosition(i, point);
                 }
             }
+            PresentMovementArrows(active, radius, fade, age, frame);
+        }
+
+        private void PresentMovementArrows(bool active, float radius, float fade, float age, int frame)
+        {
+            if (surgeArrowGlow == null) return;
+            float direction = movementPulseDirection < 0 ? -1f : 1f;
+            var center = body.bounds.center;
+            float push = Mathf.Sin(Mathf.Clamp01(age / MovementPulseSeconds) * Mathf.PI) * radius * .24f;
+            for (int arrow = 0; arrow < surgeArrowGlow.Length; arrow++)
+            {
+                var glow = surgeArrowGlow[arrow];
+                var core = surgeArrowCore[arrow];
+                glow.enabled = core.enabled = active;
+                if (!active) continue;
+                glow.startColor = glow.endColor = new Color(.05f, 1, .22f, .95f * fade);
+                core.startColor = core.endColor = new Color(.98f, 1, .86f, fade);
+                float lane = (arrow - 1) * radius * .12f;
+                float x = direction * radius * (1.45f + arrow * .62f) + direction * push;
+                float flicker = Mathf.Sin(frame * 2.1f + arrow * 3.3f) * radius * .025f;
+                float shaft = radius * 1.05f;
+                float wing = radius * .58f;
+                Vector3 head = center + new Vector3(x, lane + flicker, 0);
+                Vector3 tail = head - Vector3.right * direction * shaft;
+                Vector3 mid = Vector3.Lerp(tail, head, .58f) +
+                    Vector3.up * Mathf.Sin(frame * 1.7f + arrow) * radius * .04f;
+                Vector3 wingUp = head - Vector3.right * direction * wing + Vector3.up * radius * .5f;
+                Vector3 wingDown = head - Vector3.right * direction * wing - Vector3.up * radius * .5f;
+                SetLocalArrow(glow, tail, mid, head, wingUp, wingDown);
+                SetLocalArrow(core, tail, mid, head, wingUp, wingDown);
+            }
+        }
+
+        private void SetLocalArrow(LineRenderer line, Vector3 tail, Vector3 mid, Vector3 head, Vector3 wingUp, Vector3 wingDown)
+        {
+            line.SetPosition(0, line.transform.InverseTransformPoint(tail));
+            line.SetPosition(1, line.transform.InverseTransformPoint(mid));
+            line.SetPosition(2, line.transform.InverseTransformPoint(head));
+            line.SetPosition(3, line.transform.InverseTransformPoint(wingUp));
+            line.SetPosition(4, line.transform.InverseTransformPoint(head));
+            line.SetPosition(5, line.transform.InverseTransformPoint(wingDown));
         }
 
         public void Clear()
@@ -356,6 +459,8 @@ namespace CandyCruisers
             if (aimingApplied && body != null) body.transform.localRotation = restingRotation;
             aimingApplied = false;
             phaseRemaining = shiftRemaining = imitationRemaining = revealRemaining = movementPulseRemaining = dashRemaining = 0;
+            yellowRevealSprite = null;
+            yellowRevealAge = yellowRevealArrivalSeconds = yellowRevealReturnSeconds = 0;
             feedingImitation = false;
             linkedImitation = false;
             target = null;
@@ -365,6 +470,8 @@ namespace CandyCruisers
             if (feedingTendrils != null) foreach (var line in feedingTendrils) line.enabled = false;
             if (surgeGlow != null)
                 for (int i = 0; i < surgeGlow.Length; i++) surgeGlow[i].enabled = surgeCore[i].enabled = false;
+            if (surgeArrowGlow != null)
+                for (int i = 0; i < surgeArrowGlow.Length; i++) surgeArrowGlow[i].enabled = surgeArrowCore[i].enabled = false;
         }
         private void OnDisable() => Clear();
     }

@@ -9,6 +9,7 @@ namespace CandyCruisers.Editor
     {
         public static void Run()
         {
+            TongueTipChecks.Run();
             foreach (EnemyColor color in Enum.GetValues(typeof(EnemyColor)))
             {
                 var prefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/" + color + " Enemy.prefab");

@@ -5,7 +5,7 @@ to the playing soundtrack. On arrival, the complete title descends from above
 the screen, traverses back and forth and drops at its turns like the fleet.
 It starts above the right edge, drops, sweeps to the left edge, drops, sweeps to
 the right edge, then drops to its final height before sliding horizontally to
-center. Every direction change has a vertical drop between horizontal sweeps.
+center. Every direction change has an equal vertical drop between horizontal sweeps.
 The title waits until the first menu beat, then each vertical and horizontal leg
 starts and ends on the menu song's 140-beats-per-minute grid.
 Once it reaches its usual position, the subtitle tilts up from a flat baseline

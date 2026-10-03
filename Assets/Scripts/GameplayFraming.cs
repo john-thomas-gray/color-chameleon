@@ -10,7 +10,6 @@ namespace CandyCruisers
         public const float PlayfieldBoundaryTopY = 5.5f;
         public const float IphoneNotchDefaultTopInsetRatio = .055f;
         public const float IphoneNotchMinimumTopInsetRatio = .025f;
-        public const float IphoneNotchTargetOverlapRatio = .012f;
         public const float IphoneNotchMaxPlayfieldTopViewportY = .955f;
         public const float IphoneNotchPortraitAspectLimit = .75f;
         public const float IphoneNotchFallbackAspectLimit = .52f;
@@ -154,9 +153,11 @@ namespace CandyCruisers
             if (!ShouldApplyIphoneNotchOffset()) return 0;
             float currentTop = .5f + (PlayfieldBoundaryTopY - cameraHome.y) / (2f * view.orthographicSize);
             float topInset = Mathf.Max(TopUnsafeInsetRatio(), IphoneNotchDefaultTopInsetRatio);
-            float targetTop = Mathf.Min(1f - topInset + IphoneNotchTargetOverlapRatio,
+            float rimClearance = PlayfieldFrame.OuterTopY + PlayfieldFrame.OutlineLineWidth / 2 - PlayfieldBoundaryTopY +
+                PlayfieldFrame.BoundaryLineWidth;
+            float targetTop = Mathf.Min(1f - topInset - rimClearance / (2f * view.orthographicSize),
                 IphoneNotchMaxPlayfieldTopViewportY);
-            return Mathf.Max(0, targetTop - currentTop);
+            return targetTop - currentTop;
         }
 
         public void TickBackground(float seconds)

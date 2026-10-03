@@ -35,8 +35,10 @@ so firing geometry is not moved by body animation. Grid identity, movement,
 abilities and scoring remain on gameplay objects.
 
 `TongueShot` creates a separate `Tongue tip bulb` sprite at runtime. It sits
-slightly beyond the line endpoint, is 1.55 times the authored end width, and
-inherits the endpoint color and magic-shot scaling. Replace that sprite or its
+slightly beyond the line endpoint, is 2.2 times the authored end width, and
+has a solid center with a narrow antialiased edge. It inherits the endpoint color
+and magic-shot scaling. `TongueShot` alone controls its visibility; player restart,
+respawn and invulnerability flashing must not enable an inactive bulb. Replace that sprite or its
 renderer independently when final tongue artwork is available; it has no hitbox
 and does not alter tongue collision distance.
 

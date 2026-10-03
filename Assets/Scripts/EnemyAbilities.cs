@@ -165,8 +165,16 @@ namespace CandyCruisers
                 presentation.Tick(seconds, enemy.Color, 0);
                 if (imitationRemaining <= .000001f)
                 {
-                    grid.CompleteImitation(enemy.Id);
+                    var yellowSprite = undisguisedSprite;
+                    float arrivalSeconds, returnSeconds;
+                    YellowRevealDurations(out arrivalSeconds, out returnSeconds);
+                    bool completed = grid.CompleteImitation(enemy.Id, out var joinedGroup);
                     ResetAbility();
+                    if (completed)
+                    {
+                        presentation.BeginYellowRevealReturn(yellowSprite, enemy.Color, arrivalSeconds, returnSeconds);
+                        grid.BeginYellowGroupPulse(joinedGroup, arrivalSeconds, returnSeconds);
+                    }
                 }
                 return;
             }
@@ -294,6 +302,18 @@ namespace CandyCruisers
             grid.GetComponent<SoundEffects>()?.PlayCue(enemy.IsSpecial ? SoundEffect.YellowHide : SoundEffect.YellowTransform);
             presentation.Tick(0, enemy.Color, 0);
             return true;
+        }
+
+        private void YellowRevealDurations(out float arrivalSeconds, out float returnSeconds)
+        {
+            arrivalSeconds = AbilityBeatClock.DefaultBeatSeconds;
+            returnSeconds = AbilityBeatClock.DefaultBeatSeconds * 2;
+            if (music == null) music = grid.GetComponent<GameplayMusicPlayer>();
+            if (music == null) return;
+            var beats = music.DurationsForBeats(3);
+            if (beats.Length < 3 || beats[0] <= .0001f || beats[1] <= .0001f || beats[2] <= .0001f) return;
+            arrivalSeconds = beats[0];
+            returnSeconds = beats[1] + beats[2];
         }
 
         public bool RevealDisguise(EnemyColor shotColor)

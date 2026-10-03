@@ -9,7 +9,7 @@ namespace CandyCruisers
         [SerializeField, Min(0.1f)] private float retractSpeed = 20f;
         public const float NormalHitRadius = .055f;
         public const float MagicHitRadius = .11f;
-        public const float TipBulbWidthMultiplier = 1.55f;
+        public const float TipBulbWidthMultiplier = 2.2f;
         private LineRenderer line;
         private SpriteRenderer tipBulb;
         private static Sprite tipBulbSprite;
@@ -73,7 +73,7 @@ namespace CandyCruisers
             get
             {
                 if (tipBulbSprite != null) return tipBulbSprite;
-                const int size = 32;
+                const int size = 64;
                 var texture = new Texture2D(size, size, TextureFormat.RGBA32, false)
                 {
                     name = "Tongue tip bulb", wrapMode = TextureWrapMode.Clamp,
@@ -84,7 +84,7 @@ namespace CandyCruisers
                 {
                     float radius = new Vector2((x + .5f) / size * 2 - 1,
                         (y + .5f) / size * 2 - 1).magnitude;
-                    float alpha = 1 - Mathf.SmoothStep(.82f, 1, radius);
+                    float alpha = Mathf.Clamp01((1 - radius) * size * .5f);
                     texture.SetPixel(x, y, new Color(1, 1, 1, alpha));
                 }
                 texture.Apply(false, true);

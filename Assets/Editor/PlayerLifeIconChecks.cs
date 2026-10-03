@@ -192,6 +192,7 @@ namespace CandyCruisers.Editor
             foreach (float t in new[] { 0, PlayerLifeIcons.ApexProgress, 1 })
                 Check(Mathf.Abs(PlayerLifeIcons.LossVerticalScale(t) - 1) < .0001f,
                     "Jump starts, hands off and ends at neutral scale");
+            CheckAnimatedGuiTransform();
             foreach (var size in new[] { new Vector2(320, 320), new Vector2(390, 844), new Vector2(960, 540), new Vector2(1179, 2556) })
             for (int slot = 0; slot < PlayerMovement.MaxExtraLives; slot++)
             {
@@ -234,6 +235,24 @@ namespace CandyCruisers.Editor
                 Check(Vector2.Distance(beforeRise.center, afterRise.center) < .02f &&
                     Vector2.Distance(beforeRise.size, afterRise.size) < .02f,
                     "Takeoff starts smoothly in position and size after the crouch");
+            }
+        }
+
+        private static void CheckAnimatedGuiTransform()
+        {
+            var rect = new Rect(92, 48, 18, 18);
+            var center = new Vector3(rect.center.x, rect.center.y, 0);
+            var feet = new Vector3(rect.center.x, rect.yMax, 0);
+            foreach (float guiScale in new[] { 1f, GameSession.SmallPhoneGuiScale, GameSession.MediumPhoneGuiScale,
+                GameSession.LargePhoneGuiScale })
+            {
+                var baseMatrix = Matrix4x4.TRS(Vector3.zero, Quaternion.identity, new Vector3(guiScale, guiScale, 1));
+                var rotating = LifeSlimeArtwork.AnimatedGuiMatrix(baseMatrix, rect, -270, 1);
+                Check(Vector2.Distance(rotating.MultiplyPoint3x4(center), baseMatrix.MultiplyPoint3x4(center)) < .001f,
+                    "Rotating life copies keep the same logical pivot under phone GUI scaling");
+                var squashing = LifeSlimeArtwork.AnimatedGuiMatrix(baseMatrix, rect, 0, .5f);
+                Check(Vector2.Distance(squashing.MultiplyPoint3x4(feet), baseMatrix.MultiplyPoint3x4(feet)) < .001f,
+                    "Squashing life copies keep their feet anchored under phone GUI scaling");
             }
         }
 

@@ -305,16 +305,17 @@ namespace CandyCruisers
                     break;
                 case Animation.YellowImitation:
                     int sample = 0;
+                    float sampleSpacing = EnemyAbilities.ImitationSeconds + music.BeatDuration * 3f + .5f;
                     foreach (EnemyColor color in Enum.GetValues(typeof(EnemyColor)))
                     {
                         if (color == EnemyColor.Yellow) continue;
                         for (int variant = 0; variant < (color == EnemyColor.Orange ? 1 : 2); variant++)
                         {
                             bool special = variant == 1 || color == EnemyColor.Orange;
-                            At(.5f + sample++ * 2.6f, () => ImitateColor(color, special));
+                            At(.5f + sample++ * sampleSpacing, () => ImitateColor(color, special));
                         }
                     }
-                    ScenarioSeconds = sample * 2.6f + 1;
+                    ScenarioSeconds = sample * sampleSpacing + 1;
                     break;
                 case Animation.OrangeBurst:
                     ClearEnemies();

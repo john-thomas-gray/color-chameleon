@@ -380,8 +380,10 @@ namespace CandyCruisers
                 return new Rect(corner.x - 58, GuiHeight - corner.y, 48, 44);
             }
         }
+        private bool PauseButtonVisible => !PresentationPreview && MobileMenuActive && !IsPaused &&
+            (State == RunState.Playing || State == RunState.Refilling);
         public bool PointerOverMenu(Vector2 point) => IsPaused || State == RunState.MainMenu || State == RunState.GameOver ||
-            PauseButton.Contains(FlipGuiY(ToGuiPoint(point)));
+            PauseButtonVisible && PauseButton.Contains(FlipGuiY(ToGuiPoint(point)));
 
         private void OnEnable()
         {
@@ -566,13 +568,9 @@ namespace CandyCruisers
 
         private bool ActivateMenuTouch(Vector2 point)
         {
-            point = FlipGuiY(ToGuiPoint(point));
             if (State == RunState.MainMenu)
-            {
-                if (TryActivateMainMenuLevelSelect(point)) return true;
-                ActivateMainMenu();
-                return true;
-            }
+                return ActivateMainMenuTouch(point, new Vector2(Screen.width, Screen.height), MobileMenuActive);
+            point = MenuPointFromScreen(point, new Vector2(Screen.width, Screen.height), MobileMenuActive);
             if (State == RunState.GameOver)
             {
                 if (!GameOverTitleReady) return false;
@@ -595,10 +593,19 @@ namespace CandyCruisers
             return false;
         }
 
-        private bool TryActivateMainMenuLevelSelect(Vector2 point)
+        private bool ActivateMainMenuTouch(Vector2 point, Vector2 screen, bool mobile)
+        {
+            float scale = GuiScaleFor(mobile, screen.x, screen.y);
+            point = MenuPointFromScreen(point, screen, mobile);
+            if (!TryActivateMainMenuLevelSelect(point, screen.x / scale, screen.y / scale, mobile))
+                ActivateMainMenu();
+            return true;
+        }
+
+        private bool TryActivateMainMenuLevelSelect(Vector2 point, float width, float height, bool mobile)
         {
             if (!MainMenuLevelSelectVisible) return false;
-            var row = MainMenuLevelSelectRect(GuiWidth, GuiHeight);
+            var row = MainMenuLevelSelectRect(width, height, mobile);
             if (MainMenuLevelSelectLeftButtonRect(row).Contains(point))
             {
                 menuLevelDigits = "";
@@ -611,7 +618,8 @@ namespace CandyCruisers
                 SetSelectableStartLevel(StartLevel + 1);
                 return true;
             }
-            return MainMenuLevelSelectValueRect(row).Contains(point);
+            // Gaps and the number belong to the selector, never the tap-to-start background.
+            return MainMenuLevelSelectTouchRect(row, mobile).Contains(point);
         }
 
         private static void TogglePlayerInvincible() => DeveloperOptions.PlayerInvincible = !DeveloperOptions.PlayerInvincible;
@@ -1037,7 +1045,7 @@ namespace CandyCruisers
             if (State == RunState.MainMenu) { DrawMinimalMainMenu(); return; }
             if (State != RunState.MainMenu) DrawProgress(GameOverScoreOpacity);
             if (State == RunState.GameOver) { DrawGameOver(); return; }
-            if (!PresentationPreview && !IsPaused && (State == RunState.Playing || State == RunState.Refilling))
+            if (PauseButtonVisible)
             {
                 var pause = PauseButton;
                 if (GUI.Button(pause, new GUIContent("", "Pause (P)"))) Pause();
@@ -1215,12 +1223,20 @@ namespace CandyCruisers
             if (shortest >= 700) return MediumPhoneGuiScale;
             return SmallPhoneGuiScale;
         }
-        private static float GuiScale => GuiScaleFor(Application.isMobilePlatform, Screen.width, Screen.height);
+#if UNITY_EDITOR
+        public static bool ForceMobileMenuForTests { get; set; }
+        private static bool MobileMenuActive => Application.isMobilePlatform || ForceMobileMenuForTests;
+#else
+        private static bool MobileMenuActive => Application.isMobilePlatform;
+#endif
+        private static float GuiScale => GuiScaleFor(MobileMenuActive, Screen.width, Screen.height);
         private static float GuiWidth => Screen.width / GuiScale;
         private static float GuiHeight => Screen.height / GuiScale;
         private static Vector2 ToGuiPoint(Vector2 point) => point / GuiScale;
         private static Vector3 ToGuiPoint(Vector3 point) => point / GuiScale;
         private static Vector2 FlipGuiY(Vector2 point) => new Vector2(point.x, GuiHeight - point.y);
+        public static Vector2 MenuPointFromScreen(Vector2 point, Vector2 screen, bool mobile) =>
+            new Vector2(point.x, screen.y - point.y) / GuiScaleFor(mobile, screen.x, screen.y);
         public static Rect MainMenuTitleRect(float screenWidth, float screenHeight, float menuAnchorY)
         {
             float width = Mathf.Min(560, Mathf.Max(120, screenWidth - 32));
@@ -1441,10 +1457,10 @@ namespace CandyCruisers
             return new Rect(title.x, title.center.y + 26, title.width, 34);
         }
 
-        public static Rect MainMenuLevelSelectRect(float width, float height)
+        public static Rect MainMenuLevelSelectRect(float width, float height, bool mobile = false)
         {
             var subtitle = MinimalSubtitleRect(width, height);
-            float size = height < 520 ? 30 : height < 720 ? 34 : 40;
+            float size = mobile ? Mathf.Clamp(width * .11f, 44, 72) : height < 520 ? 30 : height < 720 ? 34 : 40;
             float rowWidth = Mathf.Min(width - 72, Mathf.Max(size * 3.8f, size * 2 + 86));
             float y = Mathf.Min(height - size - 34, subtitle.yMax + (height < 520 ? 12 : 20));
             y = Mathf.Max(subtitle.yMax + 8, y);
@@ -1456,6 +1472,12 @@ namespace CandyCruisers
 
         public static Rect MainMenuLevelSelectRightButtonRect(Rect row) =>
             new Rect(row.xMax - row.height, row.y, row.height, row.height);
+
+        public static Rect MainMenuLevelSelectTouchRect(Rect row, bool mobile)
+        {
+            float padding = mobile ? 12 : 0;
+            return new Rect(row.x - padding, row.y - padding, row.width + padding * 2, row.height + padding * 2);
+        }
 
         public static Rect MainMenuLevelSelectValueRect(Rect row)
         {
@@ -1511,8 +1533,8 @@ namespace CandyCruisers
             float reveal = MenuIntroAnimation.SubtitleProgress(menuTitleElapsed);
             var subtitleTransform = MenuIntroAnimation.SubtitleTransform(subtitleRect, menuTitleElapsed);
             var art = player != null ? CharacterVisuals.Ensure(player.gameObject) : null;
-            var character = art != null ? MenuCharacterPose(art) : default;
             float beat = musicPlayer != null ? musicPlayer.BeatPosition : 0;
+            var character = art != null ? MenuCharacterPose(art) : default;
             Color lightColor = MainMenuSubtitleBeatColor(beat);
             float lightOpacity = opacity * MainMenuWordRevealProgress(MainMenuTitleWords.Length, menuTitleElapsed);
             if (Event.current.type == EventType.Repaint && lightOpacity > 0)
@@ -1578,7 +1600,7 @@ namespace CandyCruisers
         private void DrawMainMenuLevelSelect(float beat, float opacity)
         {
             if (!MainMenuLevelSelectVisible) return;
-            var row = MainMenuLevelSelectRect(GuiWidth, GuiHeight);
+            var row = MainMenuLevelSelectRect(GuiWidth, GuiHeight, MobileMenuActive);
             var color = MainMenuSubtitleBeatColor(beat, opacity);
             float thickness = Mathf.Max(1, Mathf.Round(row.height * .05f));
             DrawLevelSelectArrow(MainMenuLevelSelectLeftButtonRect(row), true, color, thickness);
@@ -1630,11 +1652,15 @@ namespace CandyCruisers
             var previousColor = GUI.color;
             var previousMatrix = GUI.matrix;
             GUI.color = color;
-            GUIUtility.RotateAroundPivot(Mathf.Atan2(delta.y, delta.x) * Mathf.Rad2Deg, start);
-            GUI.DrawTexture(new Rect(start.x, start.y - thickness / 2, delta.magnitude, thickness), Texture2D.whiteTexture);
+            GUI.matrix = previousMatrix * MenuLineTransform(start, end);
+            GUI.DrawTexture(new Rect(0, -thickness / 2, delta.magnitude, thickness), Texture2D.whiteTexture);
             GUI.matrix = previousMatrix;
             GUI.color = previousColor;
         }
+
+        public static Matrix4x4 MenuLineTransform(Vector2 start, Vector2 end) =>
+            Matrix4x4.TRS(start, Quaternion.Euler(0, 0, Mathf.Atan2(end.y - start.y, end.x - start.x) * Mathf.Rad2Deg),
+                Vector3.one);
 
         private MenuIntroAnimation.Pose MenuCharacterPose(CharacterVisuals art)
         {

@@ -62,7 +62,10 @@ recordings can stay on the developer machine without entering Git history. A cle
 checkout runs silently; adding local recordings whose names match the soundtrack
 entries below re-enables menu and gameplay music.
 
-When local recordings are present, the player selects a random soundtrack song for the menu. Starting gameplay
+When local recordings are present, a temporary lock starts each fresh menu with
+Disco Descent. Clear `TemporaryMenuStartResourceName` in `GameplayMusicPlayer` to
+restore random starts. If that recording is absent, selection falls back to the
+available soundtrack; an explicit menu-track Inspector override is still honored. Starting gameplay
 continues that same song from its current sample position without a stop, seek,
 restart, volume change or beat-phase reset. The song finishes its current pass,
 then gameplay shuffles the remaining recordings. The playlist contains Another
@@ -77,9 +80,11 @@ in the shuffle bag. Each song finishes before the next
 begins. Every shuffle bag includes each song once and avoids an immediate repeat
 at its boundary.
 Playlist randomness does not consume gameplay random numbers.
-F8 skips to the next gameplay song in the Unity editor and development builds,
-including while paused. It does not replace the selected menu song or a single-clip
-Inspector override, and it is disabled in release builds. An assigned gameplay
+F8 skips to the next song on the menu or during gameplay in the Unity editor and
+development builds, including while paused. Menu skips stay on the menu and are
+not reset by the temporary starting-song lock. The opening warning still blocks
+skips. The shortcut preserves a single-clip Inspector override for the current
+context and is disabled in release builds. An assigned gameplay
 override takes over only after the carried menu song finishes.
 Fatal death stops the current track immediately, before the death animation
 advances. The scene fades to black over the duration of the next two mapped beats,

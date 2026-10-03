@@ -28,11 +28,14 @@ namespace CandyCruisers.Editor
         }
         public static void Run()
         {
-            foreach (var size in new[] { new Vector2(390, 844), new Vector2(844, 390), new Vector2(540, 960) })
+            foreach (var size in new[] { new Vector2(390, 844), new Vector2(844, 390),
+                new Vector2(540, 960), new Vector2(1179, 2556) })
             {
                 Vector2 center = new Vector2(size.x * .5f, size.y * .3f);
-                float radius = Mathf.Min(size.x, size.y) * .12f;
+                float radius = PlayerMovement.TouchFireRangePixels(size.x);
                 float spawnY = center.y + radius * 4;
+                Check(Mathf.Abs(radius - size.x * PlayerMovement.TouchFireScreenWidthFraction) < .001f,
+                    "Touch fire range uses 8% of screen width");
                 Check(PlayerMovement.IsTouchShootPosition(center + Vector2.right * radius, center, radius, spawnY), "Zone includes its side boundary");
                 Check(PlayerMovement.IsTouchShootPosition(new Vector2(center.x + radius * .8f, 0), center, radius, spawnY),
                     "The shooting zone extends to the bottom of the screen");
@@ -49,8 +52,10 @@ namespace CandyCruisers.Editor
                 cameraRoot = new GameObject("Touch test camera", typeof(Camera));
                 cameraRoot.tag = "MainCamera";
                 cameraRoot.transform.position = Vector3.back * 10;
-                cameraRoot.GetComponent<Camera>().orthographic = true;
-                cameraRoot.GetComponent<Camera>().orthographicSize = 6;
+                var camera = cameraRoot.GetComponent<Camera>();
+                camera.pixelRect = new Rect(0, 0, 1179, 2556);
+                camera.orthographic = true;
+                camera.orthographicSize = 6;
             }
             try
             {
