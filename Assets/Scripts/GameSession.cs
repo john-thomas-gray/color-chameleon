@@ -45,6 +45,10 @@ namespace CandyCruisers
         private int inputBlockedThrough = -1;
         private bool started;
         public bool IsPaused { get; private set; }
+        public bool MetronomeMenuOpen { get; private set; }
+        public bool MetronomeMenuAvailable => IsPaused && !OpeningWarningActive;
+        public bool VisualMetronomeVisible => MetronomeSettings.VisualEnabled && !OpeningWarningActive &&
+            (State == RunState.Playing || State == RunState.Refilling) && !IsPaused;
         public bool PresentationPreview { get; set; }
         public bool OpeningWarningActive => Application.isPlaying && !PresentationPreview && !epilepsyWarningShown &&
             epilepsyWarningElapsed < EpilepsyWarningSeconds;
@@ -61,7 +65,7 @@ namespace CandyCruisers
         private AudioClip refillMusicClip;
         private float refillMusicSeconds;
         private float refillSpawnSeconds;
-        private EnemyColor[] nextBatch;
+        private float refillArrivalSeconds;
         private bool restarting;
         private bool leaderboardRecorded;
         private string menuLevelDigits = "";
@@ -131,6 +135,17 @@ namespace CandyCruisers
         };
         public RunState State { get; private set; }
         public RunProgress Progress { get; } = new RunProgress();
+        public FleetState Fleet => (grid != null ? grid : GetComponent<EnemyGrid>())?.Fleet;
+        [SerializeField, HideInInspector] private TextAsset levelMap;
+        private LevelCatalog levelCatalog;
+        private bool levelMapOverridden;
+        private string levelMapError;
+        public LevelCatalog LevelCatalog
+        {
+            get => levelCatalog;
+            set { levelCatalog = value; Progress.LevelCatalog = value; levelMapOverridden = true; levelMapError = null; }
+        }
+        public LevelDefinition CurrentLevelDefinition => levelCatalog != null ? levelCatalog.ForLevel(Progress.Level) : null;
         public event System.Action WaveSpawned;
         public int LastLeaderboardRank { get; private set; }
         public Color ProgressBarColor => player != null ? player.AccentColor : Color.gray;
@@ -146,11 +161,58 @@ namespace CandyCruisers
         public ComboBreakAnimation ComboBreak { get; } = new ComboBreakAnimation();
         private float comboDeathFadeElapsed = ComboDeathFadeSeconds;
         public int ComboDeathMultiplier { get; private set; }
-        public Color ComboDeathColor { get; private set; } = Color.white;
+        public Color ComboDeathColor => ComboColor;
         public float ComboDeathOpacity => ComboDeathMultiplier > 1 ?
             1 - Mathf.SmoothStep(0, 1, comboDeathFadeElapsed / ComboDeathFadeSeconds) : 0;
-        public Color ComboColor { get; private set; } = Color.white;
-        public Font ComboFont => Resources.Load<Font>("Fonts/Bungee-Regular");
+        public Color GameplayTextColor => ProgressBarColor;
+        public Color ComboColor => GameplayTextColor;
+        private Font gameplayFont;
+        public Font ComboFont => gameplayFont != null ? gameplayFont :
+            gameplayFont = Resources.Load<Font>("Fonts/Bungee-Regular");
+        public const float GameplayTextMaxPulseScale = 1.08f;
+        public const float GameplayTextSizeScale = 1.5f;
+        public static int GameplayHeadingFontSize(int viewHeight) =>
+            Mathf.RoundToInt((viewHeight < 600 ? 11 : 13) * GameplayTextSizeScale);
+        public static int GameplayComboFontSize(int viewHeight) =>
+            Mathf.RoundToInt((viewHeight < 400 ? 11 : viewHeight < 600 ? 13 : 16) * GameplayTextSizeScale);
+        public const float GameplayHeadingHeight = 32;
+        public static float GameplayTextPulseScale(float beatPosition) =>
+            Mathf.Lerp(1, GameplayTextMaxPulseScale, GameplayMusicPlayer.BeatPulse(beatPosition));
+
+        public GUIStyle GameplayTextStyle(int fontSize, TextAnchor alignment)
+        {
+            var style = new GUIStyle
+            {
+                font = ComboFont, fontSize = fontSize, fontStyle = FontStyle.Normal,
+                alignment = alignment, padding = new RectOffset(), wordWrap = false,
+                clipping = TextClipping.Clip
+            };
+            style.normal.textColor = Color.white;
+            return style;
+        }
+
+        public static void FitGameplayText(GUIStyle style, string text, Rect rect)
+        {
+            var content = new GUIContent(text);
+            while (style.fontSize > 1 && (style.CalcSize(content).x * GameplayTextMaxPulseScale > rect.width ||
+                style.CalcSize(content).y * GameplayTextMaxPulseScale > rect.height)) style.fontSize--;
+        }
+
+        private static void DrawGameplayText(Rect rect, string text, GUIStyle style, Color tint, float opacity, float beat)
+        {
+            FitGameplayText(style, text, rect);
+            var previousMatrix = GUI.matrix;
+            var previousColor = GUI.color;
+            float anchorX = style.alignment == TextAnchor.MiddleLeft ? rect.xMin :
+                style.alignment == TextAnchor.MiddleRight ? rect.xMax : rect.center.x;
+            GUIUtility.ScaleAroundPivot(Vector2.one * GameplayTextPulseScale(beat), new Vector2(anchorX, rect.center.y));
+            GUI.color = new Color(0, 0, 0, .7f * opacity);
+            GUI.Label(new Rect(rect.x + 1, rect.y + 1, rect.width, rect.height), text, style);
+            GUI.color = new Color(tint.r, tint.g, tint.b, opacity);
+            GUI.Label(rect, text, style);
+            GUI.color = previousColor;
+            GUI.matrix = previousMatrix;
+        }
         private bool accumulatingShotScore;
         private long shotScore;
         public string ScoreFeedback => feedback;
@@ -201,20 +263,22 @@ namespace CandyCruisers
         private float feedbackRemaining;
         private string feedback = "";
         private readonly ColorClearBarAnimation clearBarAnimation = new ColorClearBarAnimation();
-        private readonly ColorClearBarLayout clearBarLayout = new ColorClearBarLayout();
-        public List<EnemyColor> DisplayedColorClearBarColors => clearBarLayout.Active ?
-            new List<EnemyColor>(clearBarLayout.Colors) : ColorClearBarColors(spawner, grid);
+        public List<EnemyColor> DisplayedColorClearBarColors => Fleet?.BarColors() ?? new List<EnemyColor>();
         public Rect DisplayedColorClearBarSlotRect(Rect row, int index)
         {
             var colors = DisplayedColorClearBarColors;
-            return clearBarLayout.Active ? clearBarLayout.Present(colors[index], row) :
-                ColorClearBarSlotRect(row.x, row.y, row.width, colors.Count, index);
+            return ColorClearBarSlotRect(row.x, row.y, row.width, colors.Count, index);
+        }
+        public Rect DisplayedColorClearBarRect(EnemyColor color, Rect resting, float beat, int slot)
+        {
+            if (ClearCelebration.Active && !ClearCelebration.Waiting) return ClearCelebration.Present(color, resting);
+            return ColorClearBarLevelRect(clearBarAnimation.Present(color, resting), beat, slot);
         }
         public FullSetCelebration ClearCelebration { get; } = new FullSetCelebration();
         private bool partialClearCelebration;
         private int rewardedLifeSlot = -1;
         private int refillPostBarBeats = 1;
-        private int removedBarCount;
+        private int startedBarCount;
         private void OnCelebrationBarSpiked(EnemyColor color, float duration)
         {
             if (!partialClearCelebration && player != null && ClearCelebration.LastColor == color &&
@@ -236,18 +300,17 @@ namespace CandyCruisers
             if (flip == null) flip = player.gameObject.AddComponent<PlayerCelebrationFlip>();
             flip.Begin(Mathf.Clamp(duration, .35f, .7f), clockwise);
         }
-        private void OnCelebrationColorRemoved(EnemyColor color)
+        private void OnCelebrationBarStarted(EnemyColor color)
         {
             if (!grid.HasColorClearBar(color)) return;
             if (partialClearCelebration) return;
-            int index = removedBarCount++;
+            int index = startedBarCount++;
             soundEffects?.PlayCue(SoundEffect.BarPowerUp, ColorClearBarAnimation.TonePitch(index + 1));
         }
         private void OnColorCleared(EnemyColor color)
         {
             clearBarAnimation.Begin(color);
-            int bars = 0;
-            foreach (var seen in grid.SeenColors()) if (grid.HasColorClearBar(seen)) bars++;
+            int bars = Fleet.ClearedColorCount;
             soundEffects?.PlayCue(SoundEffect.ColorClear, ColorClearBarAnimation.TonePitch(bars));
             if (grid.AllColorClearBarsFilled) soundEffects?.PlayCue(SoundEffect.Jackpot);
         }
@@ -257,13 +320,11 @@ namespace CandyCruisers
         {
             if (Progress.RegisterShotColor(color)) ObserveComboStreak();
         }
-        private void OnEnemyDestroyed(EnemyColor color) => ComboColor = EnemyPalette.Get(color);
         private void OnOrangeBurstCleared(int count, bool fleetCleared, int scoreWeight)
             => AwardClear(count, fleetCleared, scoreWeight, false);
         private void AwardClear(int count, bool fleetCleared, int scoreWeight, bool applyCombo)
         {
             int before = Progress.Level;
-            var previousBarColors = fleetCleared ? DisplayedColorClearBarColors : null;
             int combo = applyCombo ? Progress.ScoringComboMultiplier : 1;
             long basePoints = (100L + 10L * (before - 1)) * scoreWeight;
             long fleetBonus = fleetCleared ? 10000L * before : 0;
@@ -278,11 +339,10 @@ namespace CandyCruisers
             if (Progress.Level > before)
             {
                 if (!PresentationPreview) RecordReachedLevel(Progress.Level);
-                clearBarLayout.Begin(previousBarColors, ColorClearBarColors(spawner, grid), CurrentBeatDuration);
                 soundEffects?.PlayCue(SoundEffect.LevelUp);
                 feedback += "  /  Level " + Progress.Level;
                 foreach (EnemyColor color in System.Enum.GetValues(typeof(EnemyColor)))
-                    if (RunProgress.UnlockLevel(color) > before && RunProgress.UnlockLevel(color) <= Progress.Level)
+                    if (CurrentLevelDefinition == null && RunProgress.UnlockLevel(color) > before && RunProgress.UnlockLevel(color) <= Progress.Level)
                         feedback += "  /  " + color + " unlocked";
             }
             if (grid != null && grid.AllColorClearBarsFilled && player != null && player.GrantLife(false))
@@ -306,7 +366,7 @@ namespace CandyCruisers
         private void Start()
         {
             started = true;
-            if (grid.Model.Count == 0 && State == RunState.Playing)
+            if (grid.Fleet.Count == 0 && State == RunState.Playing)
             {
                 bool start = startAfterReload;
                 startAfterReload = false;
@@ -328,6 +388,19 @@ namespace CandyCruisers
         public void StartRun()
         {
             if (State != RunState.MainMenu) return;
+            MetronomeMenuOpen = false;
+            LoadLevelMap();
+            if (levelMapError != null) { Debug.LogError(levelMapError, this); return; }
+            Progress.LevelCatalog = levelCatalog;
+            if (levelCatalog != null)
+            {
+                var errors = levelCatalog.ValidationErrors();
+                if (errors.Count > 0)
+                {
+                    Debug.LogError("Cannot start level progression: " + string.Join(" ", errors), this);
+                    return;
+                }
+            }
             MenuArriving = false;
             inputBlockedThrough = Time.frameCount + 1;
             leaderboardRecorded = false;
@@ -336,7 +409,9 @@ namespace CandyCruisers
             menuLevelDigits = "";
             if (!PresentationPreview) SetSelectableStartLevel(StartLevel);
             Progress.Reset(StartLevel);
-            clearBarLayout.Reset();
+            Fleet.ResetCycle();
+            spawner.ResetSequences();
+            clearBarAnimation.Reset();
             accumulatingShotScore = false;
             feedbackRemaining = 0;
             rewardedLifeSlot = -1;
@@ -344,7 +419,7 @@ namespace CandyCruisers
             if (player != null) player.ResetForRun();
             State = RunState.Playing;
             musicPlayer?.UpdatePlayback();
-            BeginBatch(StartLevel == RunProgress.MinLevel ? spawner.PlanOpening() : spawner.PlanBatch(Progress.BatchRows),
+            BeginBatch(spawner.PlanNextFleet(),
                 musicPlayer != null ? musicPlayer.SecondsForBeats(1) : CurrentBeatDuration);
         }
         public void Pause()
@@ -360,6 +435,7 @@ namespace CandyCruisers
         }
         public void Resume()
         {
+            MetronomeMenuOpen = false;
             if (!IsPaused) return;
             IsPaused = false;
             Time.timeScale = previousTimeScale;
@@ -385,8 +461,17 @@ namespace CandyCruisers
         public bool PointerOverMenu(Vector2 point) => IsPaused || State == RunState.MainMenu || State == RunState.GameOver ||
             PauseButtonVisible && PauseButton.Contains(FlipGuiY(ToGuiPoint(point)));
 
+        private void LoadLevelMap()
+        {
+            if (levelMapOverridden || levelMap == null) return;
+            try { levelCatalog = LevelCatalog.Load(levelMap); levelMapError = null; }
+            catch (System.FormatException error) { levelCatalog = null; levelMapError = error.Message; }
+        }
+
         private void OnEnable()
         {
+            LoadLevelMap();
+            Progress.LevelCatalog = levelCatalog;
             soundEffects = GetComponent<SoundEffects>();
             if (soundEffects == null) soundEffects = gameObject.AddComponent<SoundEffects>();
             musicPlayer = GetComponent<GameplayMusicPlayer>();
@@ -396,20 +481,20 @@ namespace CandyCruisers
             spawner = GetComponent<EnemyRowSpawner>();
             movement = GetComponent<EnemyGridMovement>();
             grid.FleetCleared += BeginRefill;
-            ClearCelebration.ColorRemoved += OnCelebrationColorRemoved;
+            ClearCelebration.BarStarted += OnCelebrationBarStarted;
             ClearCelebration.BarSpiked += OnCelebrationBarSpiked;
             grid.MatchCleared += OnMatchCleared;
             grid.MatchColorScored += OnMatchColorScored;
             grid.OrangeBurstCleared += OnOrangeBurstCleared;
             grid.ColorCleared += OnColorCleared;
-            grid.EnemyDestroyed += OnEnemyDestroyed;
             SubscribeToPlayer();
         }
         private void OnDisable()
         {
             ClearCelebration.Reset();
-            clearBarLayout.Reset();
-            ClearCelebration.ColorRemoved -= OnCelebrationColorRemoved;
+            Fleet?.Reserve(null);
+            clearBarAnimation.Reset();
+            ClearCelebration.BarStarted -= OnCelebrationBarStarted;
             ClearCelebration.BarSpiked -= OnCelebrationBarSpiked;
             if (player != null) player.SetCelebrationColor(null);
             if (IsPaused) { Time.timeScale = previousTimeScale; IsPaused = false; }
@@ -419,7 +504,6 @@ namespace CandyCruisers
             if (grid != null) grid.MatchColorScored -= OnMatchColorScored;
             if (grid != null) grid.OrangeBurstCleared -= OnOrangeBurstCleared;
             if (grid != null) grid.ColorCleared -= OnColorCleared;
-            if (grid != null) grid.EnemyDestroyed -= OnEnemyDestroyed;
             UnsubscribeFromPlayer();
             musicPlayer?.StopPlayback();
         }
@@ -487,27 +571,48 @@ namespace CandyCruisers
         private void Update()
         {
             if (PresentationPreview) { Tick(Time.deltaTime); return; }
-            if (OpeningWarningActive) { Tick(Time.unscaledDeltaTime); return; }
-            if (IsPaused || State == RunState.MainMenu || State == RunState.GameOver)
+            if (OpeningWarningActive || IsPaused || State == RunState.MainMenu || State == RunState.GameOver)
                 foreach (var touch in Input.touches)
                     if (touch.phase == TouchPhase.Ended && ActivateMenuTouch(touch.position)) return;
-            if ((State == RunState.GameOver || State == RunState.MainMenu) && Input.touchCount == 0 && Input.GetMouseButtonUp(0) &&
+            if ((OpeningWarningActive || State == RunState.GameOver || State == RunState.MainMenu) && Input.touchCount == 0 && Input.GetMouseButtonUp(0) &&
                 ActivateMenuTouch(Input.mousePosition)) return;
+            if (IsPaused && Input.touchCount == 0 && Input.GetMouseButtonUp(0) &&
+                TryActivateMetronomeMenu(MenuPointFromScreen(Input.mousePosition, new Vector2(Screen.width, Screen.height), MobileMenuActive),
+                    new Vector2(Screen.width, Screen.height), Screen.safeArea, MobileMenuActive)) return;
             foreach (var key in MenuKeys)
                 if (Input.GetKeyDown(key) && HandleMenuKey(key)) return;
-            Tick(State == RunState.GameOver || State == RunState.Dying ? Time.unscaledDeltaTime : Time.deltaTime);
+            Tick(OpeningWarningActive || State == RunState.GameOver || State == RunState.Dying ? Time.unscaledDeltaTime : Time.deltaTime);
         }
 
         private static readonly KeyCode[] MenuKeys = { KeyCode.P, KeyCode.Escape, KeyCode.Return,
             KeyCode.KeypadEnter, KeyCode.Space, KeyCode.R, KeyCode.M, KeyCode.LeftArrow, KeyCode.RightArrow,
-            KeyCode.I, KeyCode.Alpha0, KeyCode.Alpha1, KeyCode.Alpha2, KeyCode.Alpha3, KeyCode.Alpha4,
+            KeyCode.I, KeyCode.F9, KeyCode.F10, KeyCode.Alpha0, KeyCode.Alpha1, KeyCode.Alpha2, KeyCode.Alpha3, KeyCode.Alpha4,
             KeyCode.Alpha5, KeyCode.Alpha6, KeyCode.Alpha7, KeyCode.Alpha8, KeyCode.Alpha9,
             KeyCode.Keypad0, KeyCode.Keypad1, KeyCode.Keypad2, KeyCode.Keypad3, KeyCode.Keypad4,
             KeyCode.Keypad5, KeyCode.Keypad6, KeyCode.Keypad7, KeyCode.Keypad8, KeyCode.Keypad9 };
 
         public bool HandleMenuKey(KeyCode key)
         {
+            if (OpeningWarningActive)
+            {
+                if (key != KeyCode.Space && key != KeyCode.Return && key != KeyCode.KeypadEnter && key != KeyCode.Escape)
+                    return false;
+                DismissOpeningWarning();
+                return true;
+            }
             if (State == RunState.Dying || State == RunState.GameOver && !GameOverTitleReady) return false;
+            if (key == KeyCode.F9 || key == KeyCode.F10)
+            {
+                if (!MetronomeMenuAvailable) return false;
+                if (key == KeyCode.F9) musicPlayer?.SetVoiceMetronome(!MetronomeSettings.VoiceEnabled);
+                else MetronomeSettings.VisualEnabled = !MetronomeSettings.VisualEnabled;
+                return true;
+            }
+            if (MetronomeMenuOpen)
+            {
+                if (key == KeyCode.Escape || key == KeyCode.P) MetronomeMenuOpen = false;
+                return true;
+            }
             if (DeveloperOptions.Available && key == KeyCode.I)
             {
                 TogglePlayerInvincible();
@@ -568,9 +673,15 @@ namespace CandyCruisers
 
         private bool ActivateMenuTouch(Vector2 point)
         {
+            if (OpeningWarningActive)
+            {
+                DismissOpeningWarning();
+                return true;
+            }
             if (State == RunState.MainMenu)
                 return ActivateMainMenuTouch(point, new Vector2(Screen.width, Screen.height), MobileMenuActive);
             point = MenuPointFromScreen(point, new Vector2(Screen.width, Screen.height), MobileMenuActive);
+            if (TryActivateMetronomeMenu(point, new Vector2(Screen.width, Screen.height), Screen.safeArea, MobileMenuActive)) return true;
             if (State == RunState.GameOver)
             {
                 if (!GameOverTitleReady) return false;
@@ -624,6 +735,34 @@ namespace CandyCruisers
 
         private static void TogglePlayerInvincible() => DeveloperOptions.PlayerInvincible = !DeveloperOptions.PlayerInvincible;
 
+        private bool TryActivateMetronomeMenu(Vector2 point, Vector2 screen, Rect safe, bool mobile)
+        {
+            if (!MetronomeMenuAvailable) return false;
+            float scale = GuiScaleFor(mobile, screen.x, screen.y);
+            if (MetronomeMenuOpen)
+            {
+                var panel = MetronomeMenuRect(screen, safe, scale, mobile);
+                if (MetronomeMenuRowRect(panel, 0).Contains(point))
+                    musicPlayer?.SetVoiceMetronome(!MetronomeSettings.VoiceEnabled);
+                else if (MetronomeMenuRowRect(panel, 1).Contains(point))
+                    MetronomeSettings.VisualEnabled = !MetronomeSettings.VisualEnabled;
+                else if (MetronomeMenuRowRect(panel, 2).Contains(point)) MetronomeMenuOpen = false;
+                return true;
+            }
+            if (!MetronomeMenuButtonRect(screen, safe, scale, mobile).Contains(point)) return false;
+            MetronomeMenuOpen = true;
+            return true;
+        }
+
+        private void DismissOpeningWarning()
+        {
+            epilepsyWarningElapsed = EpilepsyWarningSeconds;
+            epilepsyWarningShown = true;
+            inputBlockedThrough = Time.frameCount + 1;
+            player?.CancelPointer();
+            musicPlayer?.UpdatePlayback();
+        }
+
         public void Tick(float seconds)
         {
             if (IsPaused) return;
@@ -632,10 +771,7 @@ namespace CandyCruisers
                 epilepsyWarningElapsed = Mathf.Min(EpilepsyWarningSeconds,
                     epilepsyWarningElapsed + Mathf.Max(0, seconds));
                 if (epilepsyWarningElapsed >= EpilepsyWarningSeconds)
-                {
-                    epilepsyWarningShown = true;
-                    musicPlayer?.UpdatePlayback();
-                }
+                    DismissOpeningWarning();
                 return;
             }
             if (State == RunState.MainMenu)
@@ -677,7 +813,6 @@ namespace CandyCruisers
             ObserveComboStreak();
             TickComboPresentation(seconds);
             clearBarAnimation.Tick(seconds);
-            clearBarLayout.Tick(seconds, !ClearCelebration.Active || ClearCelebration.Finished);
             if (State == RunState.Dying)
             {
                 float previousAnimationAge = Mathf.Max(0, deathElapsed - GameOverBlackoutSeconds);
@@ -716,14 +851,12 @@ namespace CandyCruisers
             feedbackRemaining = Mathf.Max(0, feedbackRemaining - Mathf.Max(0, seconds));
             if (State != RunState.Refilling) return;
             float celebrationSeconds = Mathf.Max(0, seconds);
+            float musicElapsed = 0;
             bool musicTimed = refillMusicClip != null && musicPlayer != null &&
-                musicPlayer.Source.clip == refillMusicClip && musicPlayer.BeatClockRunning &&
-                musicPlayer.PlaybackSeconds >= refillMusicSeconds;
+                musicPlayer.TryAdvancePlayback(refillMusicClip, ref refillMusicSeconds, out musicElapsed);
             if (musicTimed)
             {
-                float now = musicPlayer.PlaybackSeconds;
-                celebrationSeconds = now - refillMusicSeconds;
-                refillMusicSeconds = now;
+                celebrationSeconds = musicElapsed;
             }
             else if (refillMusicClip != null)
             {
@@ -743,7 +876,7 @@ namespace CandyCruisers
                     if (!musicTimed) refillRemaining = musicPlayer != null && musicPlayer.BeatClockRunning ?
                         musicPlayer.SecondsAtBeat(Mathf.Floor(musicPlayer.BeatPosition) + refillPostBarBeats) -
                             musicPlayer.PlaybackSeconds : refillPostBarBeats * CurrentBeatDuration;
-                    if (refillPostBarBeats > 0) return;
+                    if (refillPostBarBeats > 0 && !musicTimed) return;
                 }
             }
             if (musicTimed)
@@ -758,15 +891,19 @@ namespace CandyCruisers
             if (ClearCelebration.Active) player.FinishWaveReturn();
             else if (player.ShotActive || grid.HasDeathEffects) return;
             movement.ResetSweep();
-            if (!spawner.SpawnBatch(nextBatch))
+            if (!spawner.SpawnBatch(Fleet.PendingPlan))
             {
                 Debug.LogError("Cannot create the next fleet batch.", this);
                 EndGame();
                 return;
             }
             State = RunState.Playing;
+            clearBarAnimation.Reset();
             Suspend(false);
             grid.RefreshSpecials();
+            if (musicTimed)
+                foreach (var presentation in grid.GetComponentsInChildren<EnemyPresentation>())
+                    presentation.SynchronizeArrival(musicPlayer, refillArrivalSeconds, refillArrivalSeconds - refillSpawnSeconds);
             ClearCelebration.Reset();
             refillMusicClip = null;
             player.SetCelebrationColor(null);
@@ -777,43 +914,47 @@ namespace CandyCruisers
 
         private void BeginRefill()
         {
-            var plan = spawner.PlanBatch(Progress.BatchRows);
+            if (CurrentLevelDefinition != null) musicPlayer?.UpdatePlayback();
+            var reservation = spawner.PlanNextFleet();
+            var plan = reservation?.OccupiedColors();
             if (State == RunState.Playing)
             {
                 partialClearCelebration = !grid.AllColorClearBarsFilled;
-                refillPostBarBeats = rewardedLifeSlot >= 0 ? 2 : 1;
-                removedBarCount = 0;
+                refillPostBarBeats = 1;
+                startedBarCount = 0;
                 var colors = grid.SeenColors();
                 var earned = colors.FindAll(grid.HasColorClearBar);
                 if (partialClearCelebration) refillPostBarBeats = 0;
-                float barBeatCount = MinimumColorClearBarSequenceBeats(earned.Count);
+                float barBeatCount = partialClearCelebration ? Mathf.Min(1, earned.Count) :
+                    MinimumColorClearBarSequenceBeats(earned.Count);
                 float barStepBeats = ColorClearBarStepBeats(barBeatCount, earned.Count);
                 float holdDuration = 0;
                 float[] removalBeatDurations = null;
                 refillMusicClip = null;
-                if (musicPlayer != null && earned.Count > 0)
+                if (musicPlayer != null && earned.Count > 0 && musicPlayer.BeatClockRunning)
                 {
                     float now = musicPlayer.PlaybackSeconds;
                     float beat = musicPlayer.BeatPositionAtTime(now);
-                    float removalStartBeat = beat;
-                    if (musicPlayer.BeatClockRunning)
-                    {
-                        float spawnBeat = RefillDownbeat(beat, barBeatCount, !partialClearCelebration,
-                            musicPlayer.CurrentDownbeatOffsetBeats, rewardedLifeSlot >= 0);
-                        // Stretch the bar choreography across the whole musical window before the reserved spawn beat.
-                        barBeatCount = ColorClearBarSequenceBeats(beat, spawnBeat, refillPostBarBeats);
-                        barStepBeats = ColorClearBarStepBeats(barBeatCount, earned.Count);
-                        removalStartBeat = spawnBeat - barBeatCount - refillPostBarBeats;
-                        refillMusicClip = musicPlayer.Source.clip;
-                        refillMusicSeconds = now;
-                        refillSpawnSeconds = musicPlayer.SecondsAtBeat(spawnBeat);
-                    }
+                    float arrivalBeat = RefillDownbeat(musicPlayer, beat, barBeatCount, !partialClearCelebration);
+                    refillArrivalSeconds = musicPlayer.SecondsAtBeat(arrivalBeat);
+                    float spawnBeat = arrivalBeat - (partialClearCelebration ? 1 : FullSetFleetArrivalBeats);
+                    refillSpawnSeconds = musicPlayer.SecondsAtBeat(spawnBeat);
+                    // Full bars animate on the beats leading into one (two bars: three, four).
+                    // The last bar and fleet growth share beat four instead of adding a beat after the bars.
+                    // Partial sets retain their shared power-down across the available window.
+                    if (partialClearCelebration)
+                        barBeatCount = ColorClearBarSequenceBeats(beat, spawnBeat, 0);
+                    barStepBeats = ColorClearBarStepBeats(barBeatCount, earned.Count);
+                    float removalStartBeat = (partialClearCelebration ? spawnBeat : arrivalBeat) - barBeatCount;
+                    refillMusicClip = musicPlayer.Source.clip;
+                    refillMusicSeconds = now;
                     holdDuration = Mathf.Max(0, musicPlayer.SecondsAtBeat(removalStartBeat) - now);
                     removalBeatDurations = new float[earned.Count];
                     for (int i = 0; i < earned.Count; i++)
                     {
                         float stepStart = removalStartBeat + i * barStepBeats;
-                        removalBeatDurations[i] = musicPlayer.SecondsAtBeat(stepStart + barStepBeats) -
+                        float stepEnd = Mathf.Min(stepStart + barStepBeats, spawnBeat);
+                        removalBeatDurations[i] = musicPlayer.SecondsAtBeat(stepEnd) -
                             musicPlayer.SecondsAtBeat(stepStart);
                     }
                 }
@@ -826,7 +967,8 @@ namespace CandyCruisers
                 }
                 if (earned.Count > 0)
                 {
-                    ClearCelebration.Begin(earned, plan, refillDuration, removalBeatDurations, holdDuration, partialClearCelebration);
+                    ClearCelebration.Begin(earned, plan, refillDuration, removalBeatDurations, holdDuration, partialClearCelebration,
+                        FullSetCelebration.BarOrder.Varied);
                     refillDuration = ClearCelebration.PlaybackDuration;
                     if (partialClearCelebration) soundEffects?.PlayCueForDuration(SoundEffect.BarPowerDown, refillDuration);
                 }
@@ -836,10 +978,10 @@ namespace CandyCruisers
                     var slots = DisplayedColorClearBarColors;
                     int barIndex = ClearCelebration.LastColor.HasValue ? slots.IndexOf(ClearCelebration.LastColor.Value) : 0;
                     player.LifeIcons.ScheduleWaveGain(rewardedLifeSlot, musicPlayer,
-                        ClearCelebration.FinalSpikeTime, barIndex, slots.Count, earned.Count > 1, ClearCelebration.LastColor);
+                        ClearCelebration.FinalSpikeTime, barIndex, slots.Count, ClearCelebration.FinalBarOverlaps, ClearCelebration.LastColor);
                 }
                 // A developer override can exclude every earned color. Reserve the final reward color anyway.
-                if (plan != null && plan.Length > 0 && ClearCelebration.LastColor.HasValue &&
+                if (CurrentLevelDefinition == null && plan != null && plan.Length > 0 && ClearCelebration.LastColor.HasValue &&
                     System.Array.IndexOf(plan, ClearCelebration.LastColor.Value) < 0)
                 {
                     var replaced = plan[0];
@@ -848,10 +990,11 @@ namespace CandyCruisers
                         if (plan[i] == replaced) plan[i] = ClearCelebration.LastColor.Value;
                 }
                 player.SetCelebrationColor(ClearCelebration.Active ? ClearCelebration.Color : (Color?)null);
-                BeginBatch(plan, refillDuration);
+                if (CurrentLevelDefinition == null) reservation = spawner.SnapshotPlan(plan);
+                BeginBatch(reservation, refillDuration);
                 return;
             }
-            BeginBatch(plan, 0);
+            BeginBatch(reservation, 0);
         }
 
         private float CurrentBeatDuration => musicPlayer != null ? musicPlayer.BeatDuration : FullSetCelebration.StepDuration;
@@ -859,18 +1002,23 @@ namespace CandyCruisers
         public static float SecondsToNextBeat(float beatPosition, float beatDuration) =>
             (Mathf.Floor(beatPosition) + 1 - beatPosition) * Mathf.Max(.0001f, beatDuration);
 
+        public const float FullSetFleetArrivalBeats = .5f;
+
         public static float RefillDownbeat(float clearBeat, float minimumBarBeats, bool allBarsFull,
-            int offset = GameplayMusicPlayer.DownbeatOffsetBeats, bool lifeAwarded = false)
+            int offset = GameplayMusicPlayer.DownbeatOffsetBeats)
         {
-            // Pick the downbeat first; the bar choreography stretches into the available space.
-            float postBarBeats = lifeAwarded ? 2 : allBarsFull ? 1 : 0;
-            float earliestSpawn = clearBeat + Mathf.Max(0, minimumBarBeats) + postBarBeats;
-            return Mathf.Ceil((earliestSpawn - offset) / GameplayMusicPlayer.BeatsPerMeasure) *
+            // A full set's last bar and fleet arrival both fit inside the final count-off beat.
+            float startBeat = allBarsFull ? Mathf.Ceil(clearBeat) : clearBeat;
+            float earliestArrival = startBeat + Mathf.Max(0, minimumBarBeats) + (allBarsFull ? 0 : 1);
+            return Mathf.Ceil((earliestArrival - offset) / GameplayMusicPlayer.BeatsPerMeasure) *
                 GameplayMusicPlayer.BeatsPerMeasure + offset;
         }
 
+        public static float RefillDownbeat(GameplayMusicPlayer music, float clearBeat, float minimumBarBeats,
+            bool allBarsFull) => RefillDownbeat(clearBeat, minimumBarBeats, allBarsFull, music.CurrentDownbeatOffsetBeats);
+
         public static float MinimumColorClearBarSequenceBeats(int earnedBars) =>
-            earnedBars > 0 ? 1 : 0;
+            Mathf.Max(0, earnedBars);
 
         public static float ColorClearBarSequenceBeats(float clearBeat, float spawnBeat, int postBarBeats) =>
             Mathf.Max(0, spawnBeat - clearBeat - Mathf.Max(0, postBarBeats));
@@ -878,14 +1026,25 @@ namespace CandyCruisers
         public static float ColorClearBarStepBeats(float sequenceBeats, int earnedBars) =>
             earnedBars > 0 ? Mathf.Max(.0001f, sequenceBeats) / earnedBars : 0;
 
-        private void BeginBatch(EnemyColor[] plan, float duration)
+        private void BeginBatch(FleetPlan reservation, float duration)
         {
             if (State != RunState.Playing) return;
             State = RunState.Refilling;
             refillRemaining = Mathf.Max(0, duration);
             if (ClearCelebration.Active) refillRemaining = 0;
-            nextBatch = plan;
-            player.PrepareNextWave(nextBatch, ClearCelebration.LastColor);
+            else if (musicPlayer != null && musicPlayer.BeatClockRunning && musicPlayer.Source.clip != null)
+            {
+                float now = musicPlayer.PlaybackSeconds;
+                float downbeat = RefillDownbeat(musicPlayer, musicPlayer.BeatPositionAtTime(now), 0, false);
+                refillMusicClip = musicPlayer.Source.clip;
+                refillMusicSeconds = now;
+                refillSpawnSeconds = musicPlayer.SecondsAtBeat(downbeat - 1);
+                refillArrivalSeconds = musicPlayer.SecondsAtBeat(downbeat);
+            }
+            Fleet.Reserve(reservation);
+            var reserved = ClearCelebration.LastColor;
+            if (reservation == null || !reserved.HasValue || !reservation.Contains(reserved.Value)) reserved = null;
+            player.PrepareNextWave(reservation, reserved);
             Suspend(true);
         }
 
@@ -1035,13 +1194,105 @@ namespace CandyCruisers
             float scale = GuiScale;
             if (!Mathf.Approximately(scale, 1))
                 GUI.matrix = Matrix4x4.TRS(Vector3.zero, Quaternion.identity, new Vector3(scale, scale, 1));
-            try { DrawGui(); }
+            try
+            {
+                DrawGui();
+                if (MetronomeMenuAvailable && !MetronomeMenuOpen)
+                    DrawMetronomeMenuButton();
+                if (VisualMetronomeVisible) DrawDevelopmentMetronome();
+            }
             finally { GUI.matrix = previousMatrix; }
+        }
+
+        private static Rect MetronomeSafeRect(Vector2 screen, Rect safeArea, float scale) =>
+            new Rect(safeArea.x / scale, (screen.y - safeArea.yMax) / scale, safeArea.width / scale, safeArea.height / scale);
+
+        public static Rect MetronomeMenuButtonRect(Vector2 screen, Rect safeArea, float scale, bool mobile)
+        {
+            var safe = MetronomeSafeRect(screen, safeArea, scale);
+            float height = mobile ? Mathf.Clamp(screen.x / scale * .12f, 44, 72) : 40;
+            return new Rect(safe.x + 8, safe.y + 8, Mathf.Min(168, safe.width * .38f), height);
+        }
+
+        public static Rect MetronomeMenuRect(Vector2 screen, Rect safeArea, float scale, bool mobile)
+        {
+            var safe = MetronomeSafeRect(screen, safeArea, scale);
+            float buttonHeight = mobile ? Mathf.Clamp(screen.x / scale * .12f, 44, 72) : 44;
+            var size = new Vector2(Mathf.Min(340, safe.width - 16), Mathf.Min(76 + buttonHeight * 3, safe.height - 16));
+            return new Rect(safe.center - size / 2, size);
+        }
+
+        public static Rect MetronomeMenuRowRect(Rect panel, int row)
+        {
+            float height = (panel.height - 76) / 3;
+            return new Rect(panel.x + 12, panel.y + 48 + row * (height + 8), panel.width - 24, height);
+        }
+
+        private void DrawMetronomeMenuButton()
+        {
+            var rect = MetronomeMenuButtonRect(new Vector2(Screen.width, Screen.height), Screen.safeArea, GuiScale, MobileMenuActive);
+            var style = new GUIStyle(GUI.skin.button) { font = ComboFont, fontSize = 16 };
+            while (style.fontSize > 9 && style.CalcSize(new GUIContent("Metronomes")).x > rect.width - 8) style.fontSize--;
+            GUI.Box(rect, "Metronomes", style);
+        }
+
+        private void DrawMetronomeMenu()
+        {
+            var previous = GUI.color;
+            GUI.color = new Color(0, 0, 0, .94f);
+            GUI.DrawTexture(new Rect(0, 0, GuiWidth, GuiHeight), Texture2D.whiteTexture);
+            var panel = MetronomeMenuRect(new Vector2(Screen.width, Screen.height), Screen.safeArea, GuiScale, MobileMenuActive);
+            GUI.color = Color.white;
+            GUI.Box(panel, "");
+            var heading = new GUIStyle(GUI.skin.label) { font = ComboFont, fontSize = 20, alignment = TextAnchor.MiddleCenter };
+            GUI.Label(new Rect(panel.x + 12, panel.y + 10, panel.width - 24, 30), "METRONOMES", heading);
+            string[] labels = { "Voice metronome: " + (MetronomeSettings.VoiceEnabled ? "ON" : "OFF"),
+                "Visual metronome: " + (MetronomeSettings.VisualEnabled ? "ON" : "OFF"), "Back" };
+            for (int row = 0; row < labels.Length; row++)
+            {
+                var rect = MetronomeMenuRowRect(panel, row);
+                var style = new GUIStyle(GUI.skin.button) { fontSize = 18 };
+                while (style.fontSize > 10 && style.CalcSize(new GUIContent(labels[row])).x > rect.width - 12) style.fontSize--;
+                GUI.Box(rect, labels[row], style);
+            }
+            GUI.color = previous;
+        }
+
+        public static Rect DevelopmentMetronomeRect(Vector2 screen, Rect safeArea, float scale)
+        {
+            scale = Mathf.Max(.0001f, scale);
+            float width = Mathf.Min(158, safeArea.width / scale - 16);
+            float height = Mathf.Min(24, safeArea.height / scale - 16);
+            return new Rect(safeArea.xMax / scale - width - 8, (screen.y - safeArea.yMax) / scale + 8, width, height);
+        }
+
+        private void DrawDevelopmentMetronome()
+        {
+            var rect = DevelopmentMetronomeRect(new Vector2(Screen.width, Screen.height), Screen.safeArea, GuiScale);
+            int active = musicPlayer != null && musicPlayer.Source.clip != null ? musicPlayer.CurrentBeatInMeasure : 0;
+            var previous = GUI.color;
+            GUI.color = new Color(0, 0, 0, .8f);
+            GUI.DrawTexture(rect, Texture2D.whiteTexture);
+            var caption = new GUIStyle(GUI.skin.label) { fontSize = 8, alignment = TextAnchor.MiddleLeft };
+            caption.normal.textColor = new Color(.65f, .7f, .75f);
+            GUI.color = Color.white;
+            GUI.Label(new Rect(rect.x + 5, rect.y, 26, rect.height), "BEAT", caption);
+            var number = new GUIStyle(GUI.skin.label) { fontSize = 20, fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter, padding = new RectOffset() };
+            for (int beat = 1; beat <= GameplayMusicPlayer.BeatsPerMeasure; beat++)
+            {
+                number.normal.textColor = beat == active ? beat == 1 ? new Color(.35f, 1, .6f) : Color.white : new Color(.3f, .35f, .4f);
+                float cellWidth = (rect.width - 30) / 4;
+                GUI.Label(new Rect(rect.x + 30 + (beat - 1) * cellWidth, rect.y, cellWidth, rect.height),
+                    beat.ToString(), number);
+            }
+            GUI.color = previous;
         }
 
         private void DrawGui()
         {
             if (OpeningWarningActive) { DrawEpilepsyWarning(); return; }
+            if (MetronomeMenuOpen && IsPaused) { DrawMetronomeMenu(); return; }
             if (State == RunState.MainMenu) { DrawMinimalMainMenu(); return; }
             if (State != RunState.MainMenu) DrawProgress(GameOverScoreOpacity);
             if (State == RunState.GameOver) { DrawGameOver(); return; }
@@ -1091,7 +1342,7 @@ namespace CandyCruisers
         public static Rect EpilepsyWarningRect(float screenWidth, float screenHeight)
         {
             float width = Mathf.Min(720, Mathf.Max(120, screenWidth - 32));
-            float height = Mathf.Min(280, Mathf.Max(160, screenHeight - 32));
+            float height = Mathf.Min(320, Mathf.Max(200, screenHeight - 32));
             return new Rect((screenWidth - width) / 2, (screenHeight - height) / 2, width, height);
         }
 
@@ -1105,7 +1356,13 @@ namespace CandyCruisers
         {
             var warning = EpilepsyWarningRect(screenWidth, screenHeight);
             var title = EpilepsyWarningTitleRect(screenWidth, screenHeight);
-            return new Rect(warning.x, title.yMax + 14, warning.width, warning.yMax - title.yMax - 14);
+            return new Rect(warning.x, title.yMax + 14, warning.width, warning.yMax - title.yMax - 58);
+        }
+
+        public static Rect EpilepsyWarningSkipRect(float screenWidth, float screenHeight)
+        {
+            var warning = EpilepsyWarningRect(screenWidth, screenHeight);
+            return new Rect(warning.x, warning.yMax - 32, warning.width, 32);
         }
 
         private void DrawEpilepsyWarning()
@@ -1124,7 +1381,9 @@ namespace CandyCruisers
                 padding = new RectOffset()
             };
             title.normal.textColor = Color.white;
-            GUI.Label(titleRect, EpilepsyWarningTitle, title);
+            var titleContent = new GUIContent(EpilepsyWarningTitle);
+            while (title.fontSize > 10 && title.CalcSize(titleContent).x > titleRect.width) title.fontSize--;
+            GUI.Label(titleRect, titleContent, title);
             var message = new GUIStyle(GUI.skin.label)
             {
                 fontSize = GuiHeight < 400 ? 12 : GuiHeight < 600 ? 15 : 18,
@@ -1134,6 +1393,9 @@ namespace CandyCruisers
             };
             message.normal.textColor = Color.white;
             GUI.Label(messageRect, EpilepsyWarningMessage, message);
+            var skip = new GUIStyle(message) { fontSize = GuiHeight < 400 ? 12 : 14 };
+            GUI.Label(EpilepsyWarningSkipRect(GuiWidth, GuiHeight), MobileMenuActive ?
+                "Tap anywhere to skip" : "Click or press Space / Enter / Esc to skip", skip);
             GUI.color = previous;
         }
 
@@ -1310,19 +1572,23 @@ namespace CandyCruisers
         public static Rect ComboMultiplierRestRect(float playfieldX, float textWidth, float headingTop, int viewHeight = 960)
         {
             float width = Mathf.Min(118, textWidth * .35f);
-            float height = viewHeight < 400 ? 18 : 28;
+            float height = viewHeight < 400 ? 27 : 34;
             var row = PlayerLifeIcons.RowRect(playfieldX, headingTop, viewHeight);
             return new Rect(playfieldX + textWidth - width, row.center.y - height / 2, width, height);
         }
 
+        public static Rect GameplayScoreRect(float x, float y, float textWidth, int viewHeight)
+        {
+            float left = PlayerLifeIcons.IconRect(PlayerLifeIcons.RowRect(x, y, viewHeight), 0).xMin;
+            return new Rect(left, y, x + textWidth * .65f - 4 - left, GameplayHeadingHeight);
+        }
+
+        public static Rect GameplayLevelRect(float x, float y, float textWidth) =>
+            new Rect(x + textWidth * .65f, y, textWidth * .35f, GameplayHeadingHeight);
+
         public static List<EnemyColor> ColorClearBarColors(EnemyRowSpawner spawner, EnemyGrid grid)
         {
-            var colors = spawner != null ? spawner.UnlockedColors() : grid != null ? grid.SeenColors() : new List<EnemyColor>();
-            if (spawner != null)
-                colors.RemoveAll(color => spawner.Prefab(color) == null ||
-                    spawner.Prefab(color).GetComponentInChildren<SpriteRenderer>() == null);
-            colors.Sort();
-            return colors;
+            return grid != null ? grid.Fleet.BarColors() : new List<EnemyColor>();
         }
 
         public static Rect ColorClearBarSlotRect(float x, float bottom, float width, int count, int index)
@@ -1841,7 +2107,6 @@ namespace CandyCruisers
             if (multiplier > 1)
             {
                 ComboDeathMultiplier = multiplier;
-                ComboDeathColor = Progress.ComboMultiplier > 1 ? ComboColor : ComboBreak.SourceColor;
                 comboDeathFadeElapsed = 0;
             }
             Progress.ResetCombo();
@@ -1873,9 +2138,7 @@ namespace CandyCruisers
             comboMilestoneElapsed = ComboMilestoneAnimationSeconds;
             ComboBreak.Reset();
             ComboDeathMultiplier = 0;
-            ComboDeathColor = Color.white;
             comboDeathFadeElapsed = ComboDeathFadeSeconds;
-            ComboColor = Color.white;
         }
 
         public static bool IsComboMilestone(int multiplier) =>
@@ -1887,7 +2150,7 @@ namespace CandyCruisers
             new Rect(bar.x, bar.y + bar.height * .55f, bar.width * Mathf.Clamp01(fraction), Mathf.Max(2, bar.height * .45f));
         public static Rect LevelProgressSolidRect(Rect bar, bool pending, float pulse)
         {
-            float expansion = pending ? 3 * Mathf.Clamp01(pulse) : 0;
+            float expansion = (pending ? 3 : LevelProgressPulseExpansion) * Mathf.Clamp01(pulse);
             return new Rect(bar.x - expansion, bar.y - expansion,
                 bar.width + expansion * 2, bar.height + expansion * 2);
         }
@@ -1899,6 +2162,7 @@ namespace CandyCruisers
         }
 
         public const float LevelProgressBaseHeight = 9f * 1.5f;
+        public const float LevelProgressPulseExpansion = 1.5f;
 
         private static void DrawPreviewSprite(Rect rect, Sprite sprite, Color tint)
         {
@@ -1928,13 +2192,13 @@ namespace CandyCruisers
             float progressY = y + PlayerLifeIcons.ProgressOffset(viewHeight);
             var label = new GUIStyle(GUI.skin.label) { fontSize = viewHeight < 400 ? 11 : viewHeight < 600 ? 13 : 16, fontStyle = FontStyle.Bold };
             label.normal.textColor = Color.white;
-            float textWidth = width - 54;
+            float textWidth = width - (PauseButtonVisible ? 54 : 0);
             float beat = musicPlayer != null ? musicPlayer.BeatPosition : Time.time / FullSetCelebration.StepDuration;
             float pulse = GameplayMusicPlayer.BeatPulse(beat);
             var progressBar = new Rect(x, progressY, width, LevelProgressBaseHeight);
             var solidBar = LevelProgressSolidRect(progressBar, Progress.LevelUpPending, pulse);
             GUI.color = new Color(.3f, .4f, .45f, .7f * opacity);
-            GUI.DrawTexture(progressBar, Texture2D.whiteTexture);
+            GUI.DrawTexture(solidBar, Texture2D.whiteTexture);
             var progressColor = ProgressBarColor;
             if (Progress.LevelUpPending)
             {
@@ -1959,43 +2223,38 @@ namespace CandyCruisers
             for (int i = 0; i < colors.Count; i++)
             {
                 var color = colors[i];
-                var resting = DisplayedColorClearBarSlotRect(new Rect(x, bottom, width, 5), i);
+                var resting = ColorClearBarSlotRect(x, bottom, width, colors.Count, i);
                 bool powered = grid != null && grid.HasColorClearBar(color) && ClearCelebration.Visible(color);
                 if (!powered)
                 {
                     DrawPoweredDownColorClearBar(color, resting, opacity);
                     continue;
                 }
-                var animated = ClearCelebration.Active ? ClearCelebration.Present(colors[i], resting) :
-                    clearBarAnimation.Present(colors[i], resting);
+                bool transitioning = ClearCelebration.Active && !ClearCelebration.Waiting;
+                var animated = DisplayedColorClearBarRect(color, resting, beat, i);
                 // The enlarged bar stays inside the playfield, including the end slots.
                 animated.width = Mathf.Min(animated.width, width);
                 animated.x = Mathf.Clamp(animated.x, x, x + width - animated.width);
                 float drain = ClearCelebration.PowerDownProgressFor(color);
-                if (ClearCelebration.SimultaneousPowerDown || drain > 0)
+                if (transitioning && (ClearCelebration.SimultaneousPowerDown || drain > 0))
                     DrawPoweringDownColorClearBar(color, animated, opacity, drain);
-                else if (ClearCelebration.Active)
-                    DrawPoweredColorClearBar(color, animated, opacity, beat, i, false);
                 else DrawPoweredColorClearBar(color, animated, opacity, beat, i);
             }
             var comboRect = ComboMultiplierRestRect(x, textWidth, y, viewHeight);
-            int comboFontSize = viewHeight < 400 ? 11 : viewHeight < 600 ? 13 : 16;
+            int comboFontSize = GameplayComboFontSize(viewHeight);
             if (State == RunState.Playing || State == RunState.Refilling || State == RunState.Dying)
             {
-                var comboStyle = new GUIStyle(GUI.skin.label)
-                {
-                    font = ComboFont,
-                    fontSize = comboFontSize,
-                    fontStyle = FontStyle.Normal,
-                    alignment = TextAnchor.MiddleRight,
-                    padding = new RectOffset(),
-                    wordWrap = false,
-                    clipping = TextClipping.Clip
-                };
-                comboStyle.normal.textColor = Color.white;
+                var comboStyle = GameplayTextStyle(comboFontSize, TextAnchor.MiddleRight);
                 if (ComboDeathOpacity > 0 || ShouldDrawComboMultiplier(Progress.ComboMultiplier))
-                    DrawComboMultiplier(comboRect, comboStyle, opacity);
-                ComboBreak.Draw(comboRect, comboStyle, opacity, GuiWidth, GuiHeight);
+                    DrawComboMultiplier(comboRect, comboStyle, opacity, beat);
+                if (ComboBreak.Active)
+                {
+                    var comboMatrix = GUI.matrix;
+                    var breakRect = ComboBreak.DisplayRect(comboRect, GuiWidth, GuiHeight);
+                    GUIUtility.ScaleAroundPivot(Vector2.one * GameplayTextPulseScale(beat), breakRect.center);
+                    ComboBreak.Draw(comboRect, comboStyle, opacity, GuiWidth, GuiHeight, GameplayTextColor);
+                    GUI.matrix = comboMatrix;
+                }
             }
             GUI.color = new Color(1, 1, 1, opacity);
             label.fontSize = viewHeight < 600 ? 11 : 13;
@@ -2005,10 +2264,11 @@ namespace CandyCruisers
             if (player != null) player.LifeIcons.Draw(player, lifeRow, opacity, GuiWidth, GuiHeight);
             // Keep the heading above life artwork, including traveling reward/loss animations.
             GUI.color = new Color(1, 1, 1, opacity);
-            var heading = new GUIStyle(label) { fontStyle = FontStyle.Bold, wordWrap = false, alignment = TextAnchor.UpperLeft };
-            GUI.Label(new Rect(x, y, textWidth * .65f, 26), "SCORE " + Progress.Score.ToString("N0"), heading);
-            heading.alignment = TextAnchor.UpperRight;
-            GUI.Label(new Rect(x + textWidth * .65f, y, textWidth * .35f, 26), "LEVEL " + Progress.Level, heading);
+            int headingSize = GameplayHeadingFontSize(viewHeight);
+            DrawGameplayText(GameplayScoreRect(x, y, textWidth, viewHeight), "SCORE " + Progress.Score.ToString("N0"),
+                GameplayTextStyle(headingSize, TextAnchor.MiddleLeft), GameplayTextColor, opacity, beat);
+            DrawGameplayText(GameplayLevelRect(x, y, textWidth), "LEVEL " + Progress.Level,
+                GameplayTextStyle(headingSize, TextAnchor.MiddleRight), GameplayTextColor, opacity, beat);
             string status = "";
             if (player != null && player.MagicCharges > 0)
                 status += (status.Length > 0 ? "  |  " : "") + "MAGIC " + player.MagicCharges;
@@ -2033,9 +2293,8 @@ namespace CandyCruisers
             GUI.DrawTexture(resting, Texture2D.whiteTexture);
         }
 
-        private static void DrawPoweredColorClearBar(EnemyColor color, Rect resting, float opacity, float beatPosition, int slot, bool equalizer = true)
+        private static void DrawPoweredColorClearBar(EnemyColor color, Rect level, float opacity, float beatPosition, int slot)
         {
-            var level = equalizer ? ColorClearBarLevelRect(resting, beatPosition, slot) : resting;
             float pulse = ColorClearBarMusicLevel(beatPosition, slot);
             var tint = ColorClearBarTint(color, true, opacity);
             var glow = tint;
@@ -2080,12 +2339,12 @@ namespace CandyCruisers
         private static Rect Expanded(Rect rect, float x, float y) =>
             new Rect(rect.x - x, rect.y - y, rect.width + x * 2, rect.height + y * 2);
 
-        private void DrawComboMultiplier(Rect resting, GUIStyle baseStyle, float opacity)
+        private void DrawComboMultiplier(Rect resting, GUIStyle baseStyle, float opacity, float beat)
         {
             bool fading = ComboDeathOpacity > 0;
             bool animating = !fading && comboMilestoneMultiplier > 1 && comboMilestoneElapsed < ComboMilestoneAnimationSeconds;
             int multiplier = fading ? ComboDeathMultiplier : Progress.ComboMultiplier;
-            var color = fading ? ComboDeathColor : ComboColor;
+            var color = GameplayTextColor;
             if (fading) opacity *= ComboDeathOpacity;
             var rect = animating ? ComboMultiplierDisplayRect(resting, GuiWidth, GuiHeight, comboMilestoneElapsed) : resting;
             float scale = Mathf.Max(1, rect.height / resting.height);
@@ -2094,15 +2353,8 @@ namespace CandyCruisers
                 alignment = animating ? TextAnchor.MiddleCenter : TextAnchor.MiddleRight,
                 fontSize = Mathf.RoundToInt(baseStyle.fontSize * Mathf.Min(3, scale))
             };
-            style.normal.textColor = Color.white;
             string text = "x" + multiplier;
-            while (style.fontSize > 9 && style.CalcSize(new GUIContent(text)).x > rect.width) style.fontSize--;
-            var previous = GUI.color;
-            GUI.color = new Color(0, 0, 0, .7f * opacity);
-            GUI.Label(new Rect(rect.x + 2, rect.y + 2, rect.width, rect.height), text, style);
-            GUI.color = new Color(color.r, color.g, color.b, opacity);
-            GUI.Label(rect, text, style);
-            GUI.color = previous;
+            DrawGameplayText(rect, text, style, color, opacity, beat);
         }
 
         private void DrawLeaderboard(Rect area, bool visible)

@@ -23,10 +23,9 @@ namespace CandyCruisers
         public void Tick(float seconds, GameplayMusicPlayer music)
         {
             seconds = Mathf.Max(0, seconds);
-            bool playing = music != null && music.BeatClockRunning && music.Source.clip != null;
-            float beat = playing ? music.BeatPosition : Beat + seconds / FullSetCelebration.StepDuration;
+            float beat = music != null ? music.BeatPosition : Beat + seconds / FullSetCelebration.StepDuration;
             int offset = music != null ? music.CurrentDownbeatOffsetBeats : 0;
-            int id = playing ? music.Source.clip.GetInstanceID() : 0;
+            int id = music != null && music.Source.clip != null ? music.Source.clip.GetInstanceID() : 0;
             SetBeat(beat, offset, id);
             flipAge = Mathf.Min(flipDuration, flipAge + seconds);
         }

@@ -13,7 +13,8 @@ namespace CandyCruisers.Editor
             { "AnotherJoe", "PotentialForAnything", "DiscoDescent", "GameplayMusic", "Skanska",
                 "TheThirdKind", "DownToEarthPart1", "UntilICollapse", "WarOnActivism",
                 "IntergalacticEmotionalBreakdown", "ShootingRobotsInSpace", "VertexStage1",
-                "Contact", "CountingMetronome" };
+                "Contact", "ForWhomTheKnellTolls", "AColdSweat", "HeartOfTheCrypt", "StyxAndStones",
+                "CountingMetronome" };
 
         [Serializable] private sealed class Profile
         {

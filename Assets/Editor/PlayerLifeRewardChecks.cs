@@ -8,7 +8,7 @@ namespace CandyCruisers.Editor
     {
         public static void Run()
         {
-            CheckTrajectory(); CheckCancellation();
+            CheckTrajectory(); CheckFinalBarContact(); CheckCancellation();
             foreach (bool full in new[] { false, true })
             foreach (bool room in new[] { false, true }) CheckSession(full, room);
             if (Application.isPlaying) CheckMusicClock();
@@ -63,6 +63,41 @@ namespace CandyCruisers.Editor
             Check(!icons.Animating, "Restart clears gain, loss and reservations");
         }
 
+        private static void CheckFinalBarContact()
+        {
+            foreach (var screen in new[] { new Vector2(390, 844), new Vector2(960, 540), new Vector2(1206, 2622) })
+            foreach (var order in new[] { FullSetCelebration.BarOrder.Wave, FullSetCelebration.BarOrder.Random })
+            for (int count = 1; count <= FullSetCelebration.MaxRewardBars; count++)
+            {
+                var colors = new System.Collections.Generic.List<EnemyColor>();
+                for (int i = 0; i < count; i++) colors.Add((EnemyColor)i);
+                var wave = new FullSetCelebration();
+                var durations = new float[count];
+                for (int i = 0; i < count; i++) durations[i] = i == count - 1 ? .25f : .5f;
+                wave.Begin(colors, beatDurations: durations, holdDuration: .35f, order: order);
+                int finalIndex = colors.IndexOf(wave.LastColor.Value);
+                var gain = new PlayerLifeGainAnimation();
+                gain.Begin(1, launchDelay: wave.FinalSpikeTime, barIndex: finalIndex, barCount: count,
+                    overlappingWave: wave.FinalBarOverlaps);
+                var bars = new Rect(20, screen.y - 20, screen.x - 40, 5);
+                var resting = PlayerLifeIcons.IconRect(PlayerLifeIcons.RowRect(12, 0, (int)screen.y), 1);
+                var slot = GameSession.ColorClearBarSlotRect(bars.x, bars.y, bars.width, count, finalIndex);
+                wave.Tick(wave.FinalSpikeTime - .001f);
+                var before = wave.Present(wave.LastColor.Value, slot);
+                wave.Tick(.001f); gain.Tick(gain.LaunchAt);
+                var contact = gain.DisplayRect(resting, bars, new Vector2(40, 32), screen.x);
+                var rising = wave.Present(wave.LastColor.Value, slot);
+                Check(rising.yMin < before.yMin && rising.height > slot.height && wave.Visible(wave.LastColor.Value),
+                    "The final reward bar is visible and rising at launch in both wave and random order");
+                Near(contact.yMax, rising.yMin, "The extra life's feet contact the actual final bar at takeoff");
+                Check(contact.center.x >= slot.xMin && contact.center.x <= slot.xMax,
+                    "Shuffling cannot move the reward onto a different bar's display slot");
+                gain.Tick(.01f);
+                Check(gain.DisplayRect(resting, bars, new Vector2(40, 32), screen.x).center.y < contact.center.y,
+                    "Contact with the rising bar sends the extra life upward");
+            }
+        }
+
         private static void CheckSession(bool full, bool room)
         {
             SpecialEnemyChecks.Fixture((grid, player, tongue) =>
@@ -112,7 +147,7 @@ namespace CandyCruisers.Editor
             {
                 var session = Session(grid, player); var music = player.Music;
                 music.StopPlayback(); player.Hit(); player.TickSurvival(4);
-                var clip = AudioClip.Create("Life trampoline clock", 44100 * 20, 1, 44100, false);
+                var clip = AudioClip.Create("DiscoDescent", 44100 * 20, 1, 44100, false);
                 try
                 {
                     music.Source.clip = clip;
@@ -120,6 +155,7 @@ namespace CandyCruisers.Editor
                         .GetField("beatMaps", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(music);
                     cache[clip] = mapped ? new SongBeatMap { durationSeconds = 20,
                         beatTimes = new[] { .1f, .6f, 1.1f, 1.6f, 1.85f, 2.1f, 2.35f, 3.1f, 3.85f, 4.6f, 5.35f, 6.1f } } : null;
+                    music.Source.pitch = 0;
                     music.Source.Play(); Seek(music, 1.1f);
                     float began = music.PlaybackSeconds;
                     Clear(grid, true);
@@ -140,6 +176,7 @@ namespace CandyCruisers.Editor
         {
             var session = grid.gameObject.AddComponent<GameSession>(); session.Configure(player);
             if (!Application.isPlaying) typeof(GameSession).GetMethod("OnEnable", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(session, null);
+            if (session.OpeningWarningActive) session.HandleMenuKey(KeyCode.Space);
             return session;
         }
         private static void Clear(EnemyGrid grid, bool full)

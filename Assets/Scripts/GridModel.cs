@@ -22,7 +22,10 @@ namespace CandyCruisers
         private readonly Occupant[,] cells = new Occupant[Columns, Rows];
         private readonly Dictionary<int, Occupant> enemies = new Dictionary<int, Occupant>();
         private readonly Dictionary<int, int> imitationLinks = new Dictionary<int, int>();
+        public FleetState Fleet { get; }
+        public GridModel() => Fleet = new FleetState(this);
         public int Count => enemies.Count;
+        public Occupant Find(int id) => enemies.TryGetValue(id, out var enemy) ? enemy : null;
         public static bool InBounds(int column, int row) => column >= 0 && column < Columns && row >= 0 && row < Rows;
         public Occupant At(int column, int row) => InBounds(column, row) ? cells[column, row] : null;
 
@@ -58,6 +61,7 @@ namespace CandyCruisers
             var enemy = new Occupant(id, color, column, row);
             enemies.Add(id, enemy);
             cells[column, row] = enemy;
+            Fleet.Observe(color);
             return true;
         }
 
@@ -256,6 +260,7 @@ namespace CandyCruisers
             if (color == EnemyColor.Orange && HasOrangeNeighbor(enemy.Column, enemy.Row, id)) return false;
             if (enemy.Color != color) RemoveImitationLinks(id);
             enemy.Color = color;
+            Fleet.Observe(color);
             return true;
         }
 

@@ -6,9 +6,12 @@ namespace CandyCruisers.Editor
 {
     public static class TempoMapChecks
     {
+        public static void RunWithSoundChecks() { Run(); MusicKeyChecks.RunWithSoundChecks(); }
+
         public static void Run()
         {
             CheckClock();
+            CheckPlaybackAdvance();
             CheckValidation();
             CheckCelebration();
             CheckSoundtrack();
@@ -21,6 +24,39 @@ namespace CandyCruisers.Editor
             durationSeconds = 4,
             beatTimes = new[] { .1f, .6f, 1.1f, 1.35f, 1.6f, 2.35f, 3.1f }
         };
+
+        private static void CheckPlaybackAdvance()
+        {
+            var root = new GameObject("Playback clock jitter fixture", typeof(GameplayMusicPlayer));
+            var clip = AudioClip.Create("Playback clock", 44100, 1, 44100, false);
+            var replacement = AudioClip.Create("Replacement playback clock", 44100, 1, 44100, false);
+            try
+            {
+                var music = root.GetComponent<GameplayMusicPlayer>();
+                music.Source.clip = clip;
+                float previous = .5f;
+                music.PreviewTime = .49f;
+                Check(music.TryAdvancePlayback(clip, ref previous, out float elapsed) && elapsed == 0 && previous == .5f,
+                    "Small audio-buffer regressions hold the musical clock instead of releasing it");
+                music.PreviewTime = .55f;
+                Check(music.TryAdvancePlayback(clip, ref previous, out elapsed), "The clock continues after buffer jitter");
+                Near(elapsed, .05f, "Recovering from jitter advances only the new musical time");
+                Check(music.TryAdvancePlayback(clip, ref previous, out elapsed) && elapsed == 0,
+                    "Repeated reads cannot count a frame twice");
+                music.PreviewTime = .1f;
+                Check(!music.TryAdvancePlayback(clip, ref previous, out elapsed), "A real backwards seek releases the previous clock");
+                music.PreviewTime = .6f; music.Source.clip = replacement;
+                Check(!music.TryAdvancePlayback(clip, ref previous, out elapsed), "Track replacement releases the previous clock");
+                music.Source.clip = clip; music.PreviewTime = null; music.StopPlayback();
+                Check(!music.TryAdvancePlayback(clip, ref previous, out elapsed), "Stopped music uses the bounded fallback");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(root);
+                UnityEngine.Object.DestroyImmediate(clip);
+                UnityEngine.Object.DestroyImmediate(replacement);
+            }
+        }
 
         private static void CheckClock()
         {
@@ -68,28 +104,29 @@ namespace CandyCruisers.Editor
         {
             var animation = new FullSetCelebration();
             var colors = new List<EnemyColor> { EnemyColor.Red, EnemyColor.Blue, EnemyColor.Green };
-            int removals = 0;
+            int removals = 0, starts = 0;
             animation.ColorRemoved += color => removals++;
+            animation.BarStarted += color => starts++;
             animation.Begin(colors, beatDurations: new[] { .5f, .25f, .75f });
             Near(animation.PlaybackDuration, 1.5f, "Celebration duration sums the actual upcoming beats");
             animation.Tick(.49f);
-            Check(removals == 0 && animation.Color != Color.white, "First bar waits its complete mapped beat");
+            Check(starts == 1 && removals == 0 && animation.Color != Color.white, "First bar starts once before its mapped removal");
             animation.Tick(.02f);
-            Check(removals == 1 && animation.Color == Color.white, "Second bar begins at the faster beat boundary");
+            Check(starts == 2 && removals == 1 && animation.Color == Color.white, "Second bar and its cue begin at the faster beat boundary");
             animation.Tick(.24f);
-            Check(removals == 2 && !animation.Finished, "Faster second bar is removed on schedule");
+            Check(starts == 3 && removals == 2 && !animation.Finished, "Faster second bar is removed and the third starts on schedule");
             animation.Tick(.74f);
             Check(removals == 2 && !animation.Finished, "Slower third bar retains its full interval");
             animation.Tick(.02f);
             Check(removals == 3 && animation.Finished, "All mapped removals occur exactly once");
             animation.Tick(10);
-            Check(removals == 3, "Long frames cannot repeat completed removals");
+            Check(starts == 3 && removals == 3, "Long frames cannot repeat bar starts, cues or completed removals");
 
-            removals = 0;
+            starts = removals = 0;
             animation.Begin(colors, duration: 1.9f, beatDurations: new[] { .5f, .25f, .75f }, holdDuration: .4f);
             Near(animation.PlaybackDuration, 1.9f, "Celebration duration includes the lead-in hold");
             animation.Tick(.39f);
-            Check(removals == 0 && animation.Color == Color.white && colors.TrueForAll(animation.Visible),
+            Check(starts == 0 && removals == 0 && animation.Color == Color.white && colors.TrueForAll(animation.Visible),
                 "Lead-in hold keeps every earned bar visible before removals begin");
             animation.Tick(.27f);
             Check(removals == 0 && animation.Color != Color.white, "First bar still waits its beat after the hold");
@@ -123,6 +160,20 @@ namespace CandyCruisers.Editor
                     Check(music.UsesBeatMap && music.CurrentDownbeatOffsetBeats == 0 &&
                         music.CurrentRelativeMajorTonic == 2,
                         "Contact uses its analyzed beats, opening downbeat and D-major tonal metadata");
+                }
+                foreach (string name in new[] { "ForWhomTheKnellTolls", "AColdSweat", "HeartOfTheCrypt", "StyxAndStones" })
+                {
+                    Check(music.ContainsTrack(name), "Added soundtrack recording is registered: " + name);
+                    var asset = Resources.Load<TextAsset>("BeatMaps/" + name);
+                    var clip = Resources.Load<AudioClip>(name);
+                    var map = asset != null ? JsonUtility.FromJson<SongBeatMap>(asset.text) : null;
+                    Check(map != null && map.IsValid(clip != null ? clip.length : map.durationSeconds),
+                        "Added soundtrack map matches its recording: " + name);
+                    if (clip == null) continue;
+                    music.Source.clip = clip;
+                    Check(music.UsesBeatMap && Mathf.Abs(music.SecondsAtBeat(0) - map.FirstBeatTime) < .001f &&
+                        Mathf.Abs(music.BeatPositionAtTime(map.beatTimes[map.beatTimes.Length / 2]) - map.beatTimes.Length / 2) < .001f,
+                        "Added soundtrack follows its measured beat clock: " + name);
                 }
                 foreach (string name in new[] { "We Are Not Anonymous", "PoisonWasTheCure", "DriveSlow" })
                 {

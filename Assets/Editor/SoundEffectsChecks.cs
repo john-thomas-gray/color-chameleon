@@ -11,7 +11,7 @@ namespace CandyCruisers.Editor
             { "AnotherJoe", "PotentialForAnything", "DiscoDescent", "GameplayMusic", "Skanska",
                 "TheThirdKind", "DownToEarthPart1", "UntilICollapse", "WarOnActivism",
                 "IntergalacticEmotionalBreakdown", "ShootingRobotsInSpace", "VertexStage1",
-                "Contact", "CountingMetronome" };
+                "Contact", "ForWhomTheKnellTolls", "AColdSweat", "HeartOfTheCrypt", "StyxAndStones" };
 
         public static void ReimportSoundtrackAndCheckGameplay()
         {
@@ -26,6 +26,7 @@ namespace CandyCruisers.Editor
         [MenuItem("Candy Cruisers/Run Sound Checks")]
         public static void Run()
         {
+            using var metronomes = new MetronomeCheckSettings();
             CheckClips();
             CheckTongue();
             foreach (bool magic in new[] { false, true }) CheckEarlyReturn(magic);

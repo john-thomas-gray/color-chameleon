@@ -10,8 +10,7 @@ namespace CandyCruisers
         private LineRenderer boundary;
         private LineRenderer outline;
         private readonly LineRenderer[] corners = new LineRenderer[4];
-        private static readonly EnemyColor[] Colors = (EnemyColor[])System.Enum.GetValues(typeof(EnemyColor));
-        private readonly EnemyColor[] earnedColors = new EnemyColor[Colors.Length];
+        private readonly EnemyColor[] earnedColors = new EnemyColor[EnemyPalette.Colors.Count];
         public const float SpawnPulseSeconds = 60f / GameplayMusicPlayer.DefaultBeatsPerMinute;
         public const float OuterTopY = 5.62f;
         public const float BoundaryLineWidth = .045f;
@@ -147,8 +146,8 @@ namespace CandyCruisers
             bool returnPreview = player != null && player.ReturnColorPreview.HasValue;
             var color = player != null ? player.AccentColor : EnemyPalette.Get(EnemyColor.Blue);
             int count = 0;
-            if (!returnPreview && player != null && !player.CelebrationColor.HasValue && player.MagicCharges > 0)
-                foreach (var earned in Colors)
+            if (!returnPreview && player != null && player.Fleet != null && !player.CelebrationColor.HasValue && player.MagicCharges > 0)
+                foreach (var earned in player.Fleet.Colors)
                     if (player.HasColorClearBar(earned)) earnedColors[count++] = earned;
             if (count > 0)
             {

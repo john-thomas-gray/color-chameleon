@@ -24,7 +24,7 @@ namespace CandyCruisers
         private int lastMovementBeat = int.MinValue;
         public int Direction { get; private set; } = 1;
         public float CurrentSpeed => speed * CombatBalance.FleetSpeedMultiplier(GetComponent<GameSession>()?.Progress.Level ?? 1)
-            * (useGreenDashes ? 1 : .1f * GetComponent<EnemyGrid>().Model.ColorCount(EnemyColor.Green));
+            * (useGreenDashes ? 1 : .1f * GetComponent<EnemyGrid>().Fleet.ColorCount(EnemyColor.Green));
         public event System.Action SweepEnded;
 
         private void Awake() => Initialize();
@@ -70,7 +70,7 @@ namespace CandyCruisers
                 float currentSpeed = CurrentSpeed;
                 if (currentSpeed <= 0 || !grid.OccupiedHorizontalBounds(out float left, out float right) ||
                     right - left >= 2f * PlayerMovement.HalfWidth)
-                { if (grid.Model.Count == 0) { bankedDistance = 0; greenOrder.Clear(); pulsedGreens.Clear(); } return; }
+                { if (grid.Fleet.Count == 0) { bankedDistance = 0; greenOrder.Clear(); pulsedGreens.Clear(); } return; }
                 double distance = System.Math.Max(0, Direction > 0 ? PlayerMovement.HalfWidth - right : left + PlayerMovement.HalfWidth);
                 double step = System.Math.Min(System.Math.Max(.001, stepDistance), distance);
                 double untilStep = System.Math.Max(0, step - bankedDistance) / currentSpeed;
@@ -106,7 +106,7 @@ namespace CandyCruisers
                 if (currentSpeed <= 0 || !grid.OccupiedHorizontalBounds(out float left, out float right) ||
                     right - left >= 2f * PlayerMovement.HalfWidth)
                 {
-                    if (grid.Model.ColorCount(EnemyColor.Green) == 0 || grid.Model.Count == 0)
+                    if (grid.Fleet.ColorCount(EnemyColor.Green) == 0 || grid.Fleet.Count == 0)
                     {
                         greenOrder.Clear();
                         pulsedGreens.Clear();
@@ -187,7 +187,7 @@ namespace CandyCruisers
         {
             Initialize();
             if (!enabled || remaining < 0 || double.IsNaN(remaining) || double.IsInfinity(remaining)) return;
-            if (!useGreenDashes && grid.Model.ColorCount(EnemyColor.Green) == 0) return;
+            if (!useGreenDashes && grid.Fleet.ColorCount(EnemyColor.Green) == 0) return;
             int version = resetVersion;
             while (remaining >= 0 && enabled && version == resetVersion)
             {
@@ -208,7 +208,7 @@ namespace CandyCruisers
                 if (remaining <= 0) return;
                 // A callback may spawn, reindex, end the run, or reset the fleet.
                 // Re-read occupancy before spending the frame's remaining movement.
-                if (!useGreenDashes && grid.Model.ColorCount(EnemyColor.Green) == 0) return;
+                if (!useGreenDashes && grid.Fleet.ColorCount(EnemyColor.Green) == 0) return;
             }
         }
 

@@ -178,7 +178,7 @@ namespace CandyCruisers
                 }
                 return;
             }
-            float shieldSeconds = awaitingSpawnShield ? Mathf.Max(0, seconds - .8f * (1 - presentation.SpawnOpacity)) : seconds;
+            float shieldSeconds = awaitingSpawnShield ? Mathf.Max(0, seconds - presentation.SpawnSecondsRemaining) : seconds;
             if (awaitingSpawnShield && shieldSeconds > 0)
             {
                 awaitingSpawnShield = false;

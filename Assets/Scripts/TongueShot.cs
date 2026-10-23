@@ -156,7 +156,7 @@ namespace CandyCruisers
             if (!Active || seconds <= 0) return;
             bool wasRetracting = Retracting;
             float extensionRate = extendSpeed * (IsMagic ? 4 : 1);
-            if (grid != null && grid.Model.Count == 0 && !Retracting)
+            if (grid != null && grid.Fleet.Count == 0 && !Retracting)
             {
                 maximumLength = Mathf.Max(.0001f, Length);
                 travel = maximumLength;
@@ -176,7 +176,7 @@ namespace CandyCruisers
                     {
                         MagicMultiplier += grid.ClearMagicChain(magicId, MagicMultiplier);
                         if (!Active) return;
-                        if (grid.Model.Count == 0)
+                        if (grid.Fleet.Count == 0)
                         {
                             seconds -= (magicHitLength - travel) / extensionRate;
                             maximumLength = Mathf.Max(.0001f, magicHitLength);

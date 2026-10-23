@@ -230,7 +230,7 @@ namespace CandyCruisers
                     }
                     Session.Progress.RegisterClear(Mathf.Max(1, (Session.Progress.NextThreshold - Session.Progress.PreviousThreshold) / 2), false);
                     At(3, () => Session.Progress.RegisterClear(Session.Progress.NextThreshold - Session.Progress.Defeated +
-                        (RunProgress.NextThresholdForLevel(Level + 1) - Session.Progress.NextThreshold) / 3, false));
+                        (RunProgress.NextThresholdForLevel(Level + 1, Session.LevelCatalog) - Session.Progress.NextThreshold) / 3, false));
                     ScenarioSeconds = 6;
                     break;
                 case Animation.Tongue:

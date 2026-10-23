@@ -48,7 +48,7 @@ namespace CandyCruisers
         public void Draw(Rect resting, GUIStyle baseStyle, float opacity) =>
             Draw(resting, baseStyle, opacity, Screen.width, Screen.height);
 
-        public void Draw(Rect resting, GUIStyle baseStyle, float opacity, float screenWidth, float screenHeight)
+        public void Draw(Rect resting, GUIStyle baseStyle, float opacity, float screenWidth, float screenHeight, Color? liveTint = null)
         {
             if (!Active) return;
             string text = "x" + Multiplier;
@@ -65,7 +65,7 @@ namespace CandyCruisers
             var rect = DisplayRect(resting, screenWidth, screenHeight);
             style.fontSize = Mathf.RoundToInt(fontSize * rect.height / resting.height);
             var previous = GUI.color;
-            var tint = Tint;
+            var tint = liveTint ?? Tint;
             tint.a = opacity * Opacity;
             GUI.color = tint;
             if (Age < SplitStart) GUI.Label(rect, text, style);

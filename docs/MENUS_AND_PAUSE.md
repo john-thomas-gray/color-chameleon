@@ -68,7 +68,10 @@ These visual changes do not resize collision bounds.
 Use P, Escape or the pause button in the upper-right playfield header to pause.
 P, Escape or Resume continues the same run. Losing focus or backgrounding the
 application pauses an active run; returning to it does not resume automatically.
-The pause menu also offers Restart and Main Menu. Game over shows only a white
+The pause menu also offers Restart, Main Menu, and a **Metronomes** panel with
+independent saved voice and visual switches. These controls appear only while
+paused. Back returns to the pause menu without resuming; F9 and F10 toggle voice
+and visual metronomes while paused. The main menu has no metronome controls. Game over shows only a white
 GAME OVER title above screen center; the final score is still saved to the local leaderboard.
 R restarts a current run.
 

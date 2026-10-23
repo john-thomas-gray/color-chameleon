@@ -4,6 +4,13 @@
   "truePeakCeilingDbtp": -1,
   "tracks": [
     {
+      "resourceName": "AColdSweat",
+      "sourceSha256": "dac656232c8db0bda90b6107ecb4fe2a747e4781b0ccdee0b3fe564c0468887d",
+      "integratedLufs": -7.35,
+      "truePeakDbtp": 2.07,
+      "gainDb": -8.44
+    },
+    {
       "resourceName": "AnotherJoe",
       "sourceSha256": "4c0c879f7c86fdceb4e0287e456285eaf33f03a6eef4f8593a6f3586f1bbfabc",
       "integratedLufs": -9.51,
@@ -39,11 +46,25 @@
       "gainDb": -9.76
     },
     {
+      "resourceName": "ForWhomTheKnellTolls",
+      "sourceSha256": "6cfd5a5d54f650561f05e723c63ed4a4b43db0c27840a0e3707f8823255edc19",
+      "integratedLufs": -9.22,
+      "truePeakDbtp": 1.87,
+      "gainDb": -6.57
+    },
+    {
       "resourceName": "GameplayMusic",
       "sourceSha256": "8f69b58593549824ce6a35c380228f339906450ce07903dc30970bdb4220f90f",
       "integratedLufs": -7.79,
       "truePeakDbtp": 1.31,
       "gainDb": -8.0
+    },
+    {
+      "resourceName": "HeartOfTheCrypt",
+      "sourceSha256": "a85941eb871dbcae2a79ad55fa79962438eff4503a1b17e6b54f983430c6b3ed",
+      "integratedLufs": -8.3,
+      "truePeakDbtp": 1.52,
+      "gainDb": -7.49
     },
     {
       "resourceName": "IntergalacticEmotionalBreakdown",
@@ -72,6 +93,13 @@
       "integratedLufs": -8.44,
       "truePeakDbtp": 1.85,
       "gainDb": -7.35
+    },
+    {
+      "resourceName": "StyxAndStones",
+      "sourceSha256": "abd4f27033f24af1e559d43fa12ab5485c71bc1bc9221628196ac6f820589a46",
+      "integratedLufs": -9.14,
+      "truePeakDbtp": 1.92,
+      "gainDb": -6.65
     },
     {
       "resourceName": "TheThirdKind",

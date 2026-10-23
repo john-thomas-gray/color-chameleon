@@ -47,10 +47,9 @@ namespace CandyCruisers
             seconds = Mathf.Max(0, seconds);
             if (musicClip != null)
             {
-                if (music != null && music.Source.clip == musicClip && music.BeatClockRunning && music.PlaybackSeconds >= musicSeconds)
+                if (music != null && music.TryAdvancePlayback(musicClip, ref musicSeconds, out float elapsed))
                 {
-                    float now = music.PlaybackSeconds;
-                    seconds = now - musicSeconds; musicSeconds = now;
+                    seconds = elapsed;
                 }
                 else musicClip = null;
             }

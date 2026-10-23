@@ -70,7 +70,52 @@ namespace CandyCruisers.Editor
                 UnityEngine.Random.state = random;
             }
             RunSummonTint();
+            CheckBeatLengthArrivals();
             Debug.Log("Spawn presentation checks passed: every color, rows, batches, summons, opening overrides, immediate transparency and shield fade.");
+        }
+        private static void CheckBeatLengthArrivals()
+        {
+            var clip = AudioClip.Create("Beat-length arrival clock", 44100 * 2, 1, 44100, false);
+            try
+            {
+                SpecialEnemyChecks.Fixture((grid, player, tongue) =>
+                {
+                    var music = grid.gameObject.AddComponent<GameplayMusicPlayer>();
+                    music.Source.clip = clip;
+                    var enemy = ProgressionChecks.Add(grid, EnemyColor.Red, 0, 0);
+                    var presentation = enemy.GetComponent<EnemyPresentation>();
+                    var scale = enemy.Visuals.Body.transform.localScale;
+                    foreach (float duration in new[] { .25f, .5f, .8f, 1.25f })
+                    foreach (int frameRate in new[] { 30, 60, 120 })
+                    {
+                        music.PreviewTime = 0;
+                        presentation.GrowIn(EnemyColor.Red);
+                        presentation.SynchronizeArrival(music, duration, duration);
+                        Check(presentation.SpawnOpacity == 0, "A beat-length arrival starts fully transparent at every tempo");
+                        for (int frame = 1; frame <= Mathf.CeilToInt(duration * frameRate); frame++)
+                        {
+                            float time = Mathf.Min(duration, frame / (float)frameRate);
+                            music.PreviewTime = time;
+                            presentation.Tick(1f / frameRate, EnemyColor.Red, 0);
+                            Check(Mathf.Abs(presentation.SpawnOpacity - time / duration) < .0001f,
+                                "Spawn growth uses the complete musical beat at desktop and phone frame rates");
+                            if (time < duration)
+                                Check(enemy.Visuals.Body.transform.localScale.magnitude < scale.magnitude,
+                                    "A beat landing reaches full size only on the downbeat, without an early overshoot");
+                            if (time / duration <= .5f)
+                                Check(enemy.Visuals.Body.transform.localScale.magnitude <= scale.magnitude * .15f,
+                                    "The arrival builds toward a sharp landing rather than settling after an early full-size pose");
+                        }
+                        Check(!presentation.IsPhasing && enemy.Visuals.Body.transform.localScale == scale,
+                            "Every beat-length arrival finishes at its exact resting size");
+                    }
+                    presentation.GrowIn(EnemyColor.Red);
+                    presentation.Tick(.4f, EnemyColor.Red, 0);
+                    Check(Mathf.Abs(presentation.SpawnOpacity - .5f) < .0001f,
+                        "Ordinary arrivals retain their default timing after a beat-length arrival");
+                });
+            }
+            finally { UnityEngine.Object.DestroyImmediate(clip); }
         }
         public static void RunSummonTint()
         {
@@ -103,7 +148,8 @@ namespace CandyCruisers.Editor
                     var expected = (Color32)Color.Lerp(EnemyPalette.Get(special ? EnemyColor.Purple : color), Color.white, .25f);
                     for (int i = 0; i < 3; i++)
                     {
-                        ability.Tick(.2f);
+                        // Isolate portal/body presentation from independently tuned ability warnings.
+                        summoned.GetComponent<EnemyPresentation>().Tick(.2f, color, 0);
                         var actual = (Color32)rift.startColor;
                         Check(rift.enabled && actual.r == expected.r && actual.g == expected.g && actual.b == expected.b,
                             "Summon tint persists throughout the phase animation");
@@ -112,7 +158,7 @@ namespace CandyCruisers.Editor
                         Check(Vector3.Distance(new Vector3(body.r, body.g, body.b), new Vector3(tint.r, tint.g, tint.b)) < .001f,
                             "Arriving body retains its own color");
                     }
-                    ability.Tick(.21f);
+                    summoned.GetComponent<EnemyPresentation>().Tick(.21f, color, 0);
                     Check(!rift.enabled && !summoned.GetComponent<EnemyPresentation>().IsPhasing,
                         "Purple-tinted portal completes normally");
                     if (color == EnemyColor.Blue) Check(!ability.ShieldActive, "Summoned Blue still waits for its shield cooldown");

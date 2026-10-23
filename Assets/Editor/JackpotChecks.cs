@@ -138,8 +138,9 @@ namespace CandyCruisers.Editor
                 {
                     session.ClearCelebration.Tick(transitionDuration / 120 + .000001f);
                     hidden = earned.Count(c => !session.ClearCelebration.Visible(c));
-                    Check(partial ? hidden == 0 || hidden == earned.Length : pitches.Count == hidden,
-                        "Removal tones match the earned-rectangle disappearance pattern");
+                    int started = session.ClearCelebration.Waiting ? 0 : Mathf.Min(hidden + 1, earned.Length);
+                    Check(partial ? hidden == 0 || hidden == earned.Length : pitches.Count == started,
+                        "Each complete-set cue begins while its bar is visible, before that bar disappears");
                 }
                 Check(pitches.Count == (partial ? 1 : earned.Length) && wrongTones == 0,
                     "Partial sets use one directed tone; complete sets keep one tone per bar");

@@ -214,6 +214,8 @@ namespace CandyCruisers.Editor
                     float restingViewHeight = camera.orthographicSize;
                     session.StartRun();
                     Check(!frame.SpawnPulseActive, "The rim waits for actual fleet arrival");
+                    // Advance the silent fallback here; real audio arrival has separate frame checks.
+                    spawnMusic.StopPlayback();
                     session.Tick(2);
                     Check(frame.SpawnPulseActive && grid.Model.Count > 0, "The fleet-spawn event starts the rim pulse");
                     Check(Near(frame.SpawnPulseDuration, spawnMusic.BeatDuration), "The spawn event window retains beat timing");
@@ -368,8 +370,9 @@ namespace CandyCruisers.Editor
                     session.Tick(PlayerDeathBurst.ShatterSeconds - PlayerDeathBurst.ShatterSoundSeconds + .0001f);
                     session.Tick(.3f);
                     Check(shatters == 1 && session.GameOverTitleOpacity == 0, "Shatter is one-shot and death finishes before the title appears");
-                    Check(ParticleCenters(impact, EnemyColor.Orange).Length > 0,
-                        "The fatal sequence uses the run's unlocked colors, not just the opening fleet's colors");
+                    foreach (var color in EnemyPalette.Colors)
+                        Check(ParticleCenters(impact, color).Length == (grid.Fleet.Colors.Contains(color) ? 8 : 0),
+                            "The fatal sequence uses the actual fleet palette rather than level unlocks");
                     session.Tick(PlayerFatalDustBurst.Duration - PlayerDeathBurst.ShatterSeconds - .3f);
                     Check(session.State == GameSession.RunState.GameOver && shatters == 1 && session.GameOverTitleOpacity == 0,
                         "Finishing death does not replay a sound or snap the title into view");
@@ -460,6 +463,10 @@ namespace CandyCruisers.Editor
             {
                 foreach (int level in new[] { 1, 2, 3, 4, 5, 6, 8, 9, 19, 99 })
                 {
+                    grid.BeginColorCycle();
+                    var fleetColors = new[] { EnemyColor.Green, EnemyColor.Purple };
+                    var green = ProgressionChecks.Add(grid, fleetColors[0], 0, 0);
+                    var purple = ProgressionChecks.Add(grid, fleetColors[1], 2, 0);
                     var cover = GameOverBlackout.Create(grid.transform, null);
                     try
                     {
@@ -505,8 +512,8 @@ namespace CandyCruisers.Editor
                         cover.Present(1, .4f);
                         foreach (var pair in first)
                         {
-                            Check(pair.Value.Length == (RunProgress.IsUnlocked(pair.Key, level) ? 8 : 0),
-                                "Every unlocked color, and no locked color, contributes shards at level " + level + ": " + pair.Key);
+                            Check(pair.Value.Length == (fleetColors.Contains(pair.Key) ? 8 : 0),
+                                "Only the actual fleet colors contribute shards regardless of level: " + pair.Key);
                             var later = ParticleCenters(impact, pair.Key);
                             for (int i = 0; i < pair.Value.Length; i++)
                                 Check(Vector2.Distance(later[i], origin) > Vector2.Distance(pair.Value[i], origin) + .02f,
@@ -520,7 +527,12 @@ namespace CandyCruisers.Editor
                         Check(!impact.Active && !impact.GetComponent<MeshRenderer>().enabled,
                             "All shards and shockwaves disappear before the game-over title appears");
                     }
-                    finally { UnityEngine.Object.DestroyImmediate(cover.gameObject); }
+                    finally
+                    {
+                        UnityEngine.Object.DestroyImmediate(cover.gameObject);
+                        grid.Unregister(green); grid.Unregister(purple);
+                        UnityEngine.Object.DestroyImmediate(green.gameObject); UnityEngine.Object.DestroyImmediate(purple.gameObject);
+                    }
                 }
             });
         }
@@ -530,6 +542,8 @@ namespace CandyCruisers.Editor
             SpecialEnemyChecks.Fixture((grid, player, tongue) =>
             {
                 const int level = 9;
+                ProgressionChecks.Add(grid, EnemyColor.Green, 0, 0);
+                ProgressionChecks.Add(grid, EnemyColor.Purple, 2, 0);
                 var body = CharacterVisuals.Ensure(player.gameObject).Body;
                 var random = UnityEngine.Random.state;
                 var cue = PresentationCue.Spawn(null, PresentationCue.Kind.PlayerFatalDust, body, EnemyColor.Blue, level);
@@ -537,8 +551,7 @@ namespace CandyCruisers.Editor
                 {
                     var burst = cue.GetComponentInChildren<PlayerFatalDustBurst>();
                     var mesh = burst.GetComponent<MeshFilter>().sharedMesh;
-                    var unlocked = Enum.GetValues(typeof(EnemyColor)).Cast<EnemyColor>()
-                        .Where(color => RunProgress.IsUnlocked(color, level)).ToArray();
+                    var unlocked = grid.Fleet.Colors.ToArray();
                     Check(burst != null && cue.GetComponentsInChildren<PlayerDeathBurst>().Length == 0,
                         "Fatal player death creates a dust burst, not the recoverable shatter burst");
                     Check(mesh.vertexCount == PlayerFatalDustBurst.GrainCount * 4 &&
@@ -688,7 +701,7 @@ namespace CandyCruisers.Editor
                                     "White local impact arcs stay visible, then fully clear back to black: " + size +
                                     ", white=" + white + ", outside=" + outside);
                                 if (Near(age, .6f))
-                                    foreach (EnemyColor color in Enum.GetValues(typeof(EnemyColor)))
+                                    foreach (var color in grid.Fleet.Colors)
                                     {
                                         Color.RGBToHSV(EnemyPalette.Get(color), out float hue, out _, out _);
                                         int colored = data.Count(pixel =>
@@ -697,7 +710,7 @@ namespace CandyCruisers.Editor
                                             return saturation > .25f && value > .1f &&
                                                 Mathf.Abs(Mathf.DeltaAngle(hue * 360, actualHue * 360)) < 8;
                                         });
-                                        Check(colored > 2, "Every unlocked color has visible dispersed particles at " + size + ": " + color);
+                                        Check(colored > 2, "Every actual fleet color has visible dispersed particles at " + size + ": " + color);
                                     }
                                 if (previousFrame != null && age < FatalImpactBackdrop.Duration)
                                     Check(changed > size.y * 2,

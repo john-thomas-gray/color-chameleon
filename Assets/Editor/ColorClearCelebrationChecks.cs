@@ -46,17 +46,17 @@ namespace CandyCruisers.Editor
             SpecialEnemyChecks.Fixture((grid, player, tongue) =>
             {
                 var spawner = grid.GetComponent<EnemyRowSpawner>();
-                Check(GameSession.ColorClearBarColors(spawner, grid).SequenceEqual(new[] { EnemyColor.Red, EnemyColor.Blue }),
-                    "Level-one bar slots show unlocked colors before any color is seen");
+                Check(GameSession.ColorClearBarColors(spawner, grid).Count == 0,
+                    "An empty unplanned fleet has no invented unlocked-color slots");
                 ProgressionChecks.Add(grid, EnemyColor.Green, 0, 0);
-                Check(GameSession.ColorClearBarColors(spawner, grid).SequenceEqual(new[] { EnemyColor.Red, EnemyColor.Blue }),
-                    "A locked color does not add a bar slot before its unlock level");
+                Check(GameSession.ColorClearBarColors(spawner, grid).SequenceEqual(new[] { EnemyColor.Green }),
+                    "Actual enemy colors create slots regardless of legacy unlock gates");
                 var session = grid.gameObject.AddComponent<GameSession>();
                 session.Configure(player);
                 session.Progress.Reset(6);
                 Check(GameSession.ColorClearBarColors(spawner, grid)
-                    .SequenceEqual(new[] { EnemyColor.Red, EnemyColor.Blue, EnemyColor.Green, EnemyColor.Purple, EnemyColor.Yellow }),
-                    "Higher levels show every unlocked color slot, even before that color is cleared");
+                    .SequenceEqual(new[] { EnemyColor.Green }),
+                    "Changing the level cannot invent colors in the active fleet");
             });
 
             SpecialEnemyChecks.Fixture((grid, player, tongue) =>
@@ -194,86 +194,42 @@ namespace CandyCruisers.Editor
         private static void CheckBarUnlockTransition()
         {
             var row = new Rect(20, 500, 320, 5);
-            var initial = new List<EnemyColor> { EnemyColor.Red, EnemyColor.Blue };
-            var unlocked = ((EnemyColor[])Enum.GetValues(typeof(EnemyColor))).OrderBy(color => color).ToList();
-            var layout = new ColorClearBarLayout();
-            layout.Begin(initial, unlocked, 1);
-            layout.Tick(10, false);
-            Check(layout.Colors.SequenceEqual(initial) && layout.Present(EnemyColor.Green, row).width == 0 &&
-                layout.Present(EnemyColor.Red, row) == GameSession.ColorClearBarSlotRect(row.x, row.y, row.width, 2, 0),
-                "Pending unlocks stay hidden without squeezing the old slots during the celebration");
-            layout.Tick(.5f, true);
-            float previousRight = row.x;
-            foreach (var color in layout.Colors)
-            {
-                var rect = layout.Present(color, row);
-                Check(rect.width > 0 && rect.x >= previousRight && rect.xMax <= row.xMax && rect.yMax == row.yMax,
-                    "Multiple new slots grow in color order without overlap or leaving the bar row");
-                previousRight = rect.xMax;
-            }
-            var middle = layout.Present(EnemyColor.Green, row);
-            layout.Tick(0, true); layout.Tick(-1, true);
-            Check(layout.Present(EnemyColor.Green, row) == middle, "Zero and negative time cannot advance bar layout");
-            layout.Tick(.5f, true);
-            Check(!layout.Active, "Layout finishes after one captured beat without adding a wave delay");
-            layout.Begin(initial, initial, 1);
-            Check(!layout.Active, "Levels without new colors do not animate the layout");
-
             foreach (int level in new[] { 1, 3, 5, 8 })
             foreach (bool partial in new[] { false, true })
             SpecialEnemyChecks.Fixture((grid, player, tongue) =>
             {
-                var session = grid.gameObject.AddComponent<GameSession>();
-                session.Configure(player);
+                var session = grid.gameObject.AddComponent<GameSession>(); session.Configure(player);
                 if (!Application.isPlaying) typeof(GameSession).GetMethod("OnEnable",
                     System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(session, null);
-                var music = grid.GetComponent<GameplayMusicPlayer>();
-                music.StopPlayback();
+                var music = grid.GetComponent<GameplayMusicPlayer>(); music.StopPlayback();
                 session.Progress.Reset(level);
                 session.Progress.RegisterClear(session.Progress.NextThreshold - session.Progress.Defeated - 2, false);
-                var before = session.DisplayedColorClearBarColors;
-                var original = session.DisplayedColorClearBarSlotRect(row, 0);
-                int arrivals = 0;
-                session.WaveSpawned += () => arrivals++;
                 var red = ProgressionChecks.Add(grid, EnemyColor.Red, 0, 0);
                 var blue = ProgressionChecks.Add(grid, EnemyColor.Blue, 2, 0);
+                var before = session.DisplayedColorClearBarColors;
+                var original = session.DisplayedColorClearBarSlotRect(row, 0);
+                int arrivals = 0; session.WaveSpawned += () => arrivals++;
                 grid.ClearMatchingChain(red.Id, EnemyColor.Red);
                 if (partial) grid.ResetColorClearStreak();
                 grid.ClearMatchingChain(blue.Id, EnemyColor.Blue);
-                var target = GameSession.ColorClearBarColors(grid.GetComponent<EnemyRowSpawner>(), grid);
-                Check(session.Progress.Level == level + 1 && target.Count == before.Count + 1 &&
-                    session.DisplayedColorClearBarColors.SequenceEqual(before),
-                    "Level advances immediately but newly unlocked sound bars wait for the active bars");
+                Check(session.Progress.Level == level + 1 && session.DisplayedColorClearBarColors.SequenceEqual(before),
+                    "Level changes and reservations keep the outgoing fleet's exact bars");
                 session.Tick(session.ClearCelebration.PlaybackDuration - .001f);
                 Check(!session.ClearCelebration.Finished && session.DisplayedColorClearBarColors.SequenceEqual(before) &&
                     session.DisplayedColorClearBarSlotRect(row, 0) == original,
-                    "Old bar widths remain fixed through the last celebration frame");
-                session.Tick(.002f);
-                Check(arrivals == (partial ? 1 : 0) && session.DisplayedColorClearBarColors.SequenceEqual(before),
-                    "Celebration completion preserves partial and full-set spawn timing and begins at zero new-slot width");
-                float beat = music.BeatDuration;
-                session.Tick(beat * .25f);
-                int added = target.FindIndex(color => !before.Contains(color));
-                var small = session.DisplayedColorClearBarSlotRect(row, added);
-                var old = session.DisplayedColorClearBarSlotRect(row, 0);
-                Check(session.DisplayedColorClearBarColors.SequenceEqual(target) && small.width > 0 &&
-                    small.width < GameSession.ColorClearBarSlotRect(row.x, row.y, row.width, target.Count, added).width &&
-                    old.width < original.width, "New bars grow from zero as existing bars narrow together");
+                    "Old colors and widths stay fixed through the last celebration frame");
                 session.Pause(); session.Tick(10);
-                Check(session.DisplayedColorClearBarSlotRect(row, added) == small, "Pause freezes incoming bars");
+                Check(session.DisplayedColorClearBarSlotRect(row, 0) == original, "Pause preserves the current fleet slots");
                 session.Resume(); music.StopPlayback();
-                session.Tick(beat * .25f);
-                Check(session.DisplayedColorClearBarSlotRect(row, added).width > small.width &&
-                    session.DisplayedColorClearBarSlotRect(row, 0).width < old.width,
-                    "Resuming continues the same smooth growth and shrink transition");
-                session.Tick(beat * .51f);
+                session.Tick(.002f); session.Tick(10); session.Tick(10);
+                var target = grid.Fleet.PresentColors();
                 Check(arrivals == 1 && session.State == GameSession.RunState.Playing &&
                     session.DisplayedColorClearBarColors.SequenceEqual(target),
-                    "Bar expansion never adds another enemy-spawn delay");
+                    "Bars switch once to actual spawned colors, without another layout timer");
                 for (int i = 0; i < target.Count; i++)
                     Check(session.DisplayedColorClearBarSlotRect(row, i) ==
                         GameSession.ColorClearBarSlotRect(row.x, row.y, row.width, target.Count, i),
-                        "All bars settle exactly into the new equal-width slots");
+                        "The incoming fleet immediately uses equal-width slots");
             });
         }
 

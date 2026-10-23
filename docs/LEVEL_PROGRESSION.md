@@ -1,153 +1,157 @@
-# Level Progression
+# Level map
 
-This document exists only to define what changes as the player reaches each
-level. It intentionally leaves out mechanics that do not scale by level except
-where they constrain level-based spawning.
+Edit **`Assets/Resources/LevelMap.json`** in a text editor. This is the only
+source for authored level progression. The former Level Progression window,
+level ScriptableObjects, and Initial Wave Lines setting have been removed.
 
-## Level Triggers
+Save the file and start a new run. The Unity Editor reads the saved file again
+at run start; an in-progress run keeps its loaded settings and reservations.
+Desktop and iOS (iPhone Operating System) builds package the same file. Rebuild
+an installed game to include file changes.
 
-Level is based on cumulative defeated enemies. The next level begins when the
-defeated count reaches:
+## Format
 
-```text
-next threshold = 10 * current level * (current level + 1)
+The outer `levels` object uses consecutive keys starting at `"1"`. Each key
+identifies a level, so there is no redundant `levelNumber` setting. Object key
+order does not matter. Levels beyond the last entry reuse the last entry's
+settings, including its defeat target; their spawn cursors still reset.
+
+```json
+{
+  "schemaVersion": 1,
+  "levels": {
+    "1": {
+      "enemiesToDefeat": 20,
+      "numberOfColors": 2,
+      "possibleColors": ["Red", "Blue"],
+      "requiredColors": [],
+      "backgroundImage": "",
+      "possibleSoundtrackTracks": [],
+      "fleetSpawns": [
+        "0r0r0r",
+        "brbrbr",
+        "0r0r0r/b0b0b0",
+        "rbrbrb"
+      ],
+      "lineSpawns": ["0r0r0r", "brbrbr"]
+    }
+  }
+}
 ```
 
-| Level | Defeated enemies required | Next level at |
-| --- | ---: | ---: |
-| 1 | 0 | 20 |
-| 2 | 20 | 60 |
-| 3 | 60 | 120 |
-| 4 | 120 | 200 |
-| 5 | 200 | 300 |
-| 6 | 300 | 420 |
-| 7 | 420 | 560 |
-| 8 | 560 | 720 |
-| 9 | 720 | 900 |
-| 10 | 900 | 1100 |
+| Field | Meaning |
+| --- | --- |
+| `enemiesToDefeat` | Additional enemy defeats needed to earn the next level; at least 1. Advancement waits for the current fleet to clear. |
+| `numberOfColors` | Size of the active palette selected for a round. The actual opening can contain fewer colors when the script deliberately introduces others later. |
+| `possibleColors` | Pool for palette selection and numbered color groups. Use full color names: Red, Blue, Green, Purple, Yellow, Orange. |
+| `requiredColors` | Colors that must actually appear in every fresh fleet; also included in possibleColors and the palette count. |
+| `backgroundImage` | Sprite resource path relative to `Assets/Resources`, without an extension; empty or null means black. |
+| `possibleSoundtrackTracks` | Names from Gameplay Music Player's soundtrack registry, without extensions. An empty list permits the full soundtrack. |
+| `fleetSpawns` | Ordered list of complete fleet patterns; must contain at least one nonempty fleet. |
+| `lineSpawns` | Ordered list of incoming top-row patterns. An empty list adds no enemies on descent; existing enemies still descend normally. |
 
-## Level-by-Level Changes
+`schemaVersion` is currently 1. Unknown settings, missing required fields,
+nonconsecutive level keys, duplicate keys, invalid colors, and impossible spawn
+patterns are reported as errors. Invalid maps block Play from starting a run
+and also block player builds; they do not silently select procedural defaults.
 
-The opening fleet is always two rows of five enemies. It uses Red and Blue
-unless the editor-only spawn override is active. Refill batch size is the size
-of future full-fleet respawns after the current fleet is cleared. New top rows
-and refill rows are five enemies wide through level 6, then six enemies wide
-from level 7 onward.
+## Spawn characters and positions
 
-| Level | Newly unlocked enemy type | Eligible spawn pool | Row width | Refill batch | Enemy base points | Fleet-clear bonus | Fleet speed multiplier |
-| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| 1 | Red, Blue | Red, Blue | 5 | 10 enemies | 100 | 10,000 | 1.00 |
-| 2 | Green | Red, Blue, Green | 5 | 10 enemies | 110 | 20,000 | 1.03 |
-| 3 | None | Red, Blue, Green | 5 | 15 enemies | 120 | 30,000 | 1.06 |
-| 4 | Yellow | Red, Blue, Green, Yellow | 5 | 25 enemies | 130 | 40,000 | 1.09 |
-| 5 | None | Red, Blue, Green, Yellow | 5 | 25 enemies | 140 | 50,000 | 1.12 |
-| 6 | Purple | Red, Blue, Green, Purple, Yellow | 5 | 25 enemies | 150 | 60,000 | 1.15 |
-| 7-8 | None | Red, Blue, Green, Purple, Yellow | 6 | 36 enemies | `100 + 10 * (level - 1)` | `10000 * level` | `min(2, 1 + 0.03 * (level - 1))` |
-| 9+ | Orange | Red, Blue, Green, Purple, Yellow, Orange | 6 | 36 enemies | `100 + 10 * (level - 1)` | `10000 * level` | `min(2, 1 + 0.03 * (level - 1))` |
+| Character | Meaning |
+| --- | --- |
+| `r`, `b`, `g`, `p`, `y`, `o` | Red, Blue, Green, Purple, Yellow, Orange; uppercase also works. |
+| `0` | Empty cell; does not count as an enemy or player color. |
+| `1` through `6` | Random color identifiers; different digits bind to different colors. |
+| `/` | Next row down, starting at the leftmost column; only valid in fleetSpawns. |
 
-## Enemy Pool Changes
+Each string describes grid positions from left to right. For example,
+`"0r0r0r/b0b0b0"` places three Reds in the top row's second, fourth and sixth
+positions and three Blues in the next row's first, third and fifth positions.
+Blanks remain real gaps rather than shifting the remaining enemies together.
 
-Level gates affect future opening plans, new top rows, refill batches and Purple
-summons. Existing enemies never change type just because the level changes.
+Rows may have 1–6 positions, and fleets may have 1–11 rows. All patterns within
+one level must use the same width. Early levels can use six positions with only
+three enemies; there is no level-number gate on authored widths. `/` controls
+row count independently for each fleet. Completely blank incoming lines are
+valid; completely blank fleets are not.
 
-| Enemy type | First eligible level | Level-driven behavior change |
-| --- | ---: | --- |
-| Red | 1 | Can appear immediately. Its points and cooldown scaling follow the current level. |
-| Blue | 1 | Can appear immediately. Its points and cooldown scaling follow the current level. |
-| Green | 2 | Adds fleet movement because each live Green contributes speed. |
-| Yellow | 4 | Adds transformation, disguise and Yellow-clear reward pressure to eligible fleets. |
-| Purple | 6 | Adds ordinary and tier-two summon threats to eligible fleets. |
-| Orange | 9 | Adds swap and spacing pressure to eligible fleets. |
+Patterns are literal layouts. They are not reordered or regrouped by the old
+procedural row generator. To limit matching runs, write those limits into the
+patterns, for example `11221`, `22112`, `21122`, `12211`, `12112`, `21221`.
 
-Color-clear locks and editor spawn overrides can further filter this pool. Those
-filters are temporary state, not level progression.
+## Round-wide randomness
 
-## Scoring Changes
+A round starts when a fresh fleet is planned and ends when that fleet is cleared.
+Its active palette and all numbered assignments are chosen once and captured in
+an immutable reservation. Every numbered character in that fleet and every
+incoming line uses those assignments, including lines that wrap to the start of
+the list. A new round rolls fresh assignments, even if its fleet list loops.
+A reroll can legitimately choose the same colors as the previous round.
 
-Enemy base points rise by ten per level:
+For `312213`, if `1 = Red`, `2 = Blue`, and `3 = Green`, the resolved row is
+`grbbrg`. A later `123123` row in that round resolves to `rbgrbg`.
 
-```text
-enemy base points = 100 + 10 * (level - 1)
-```
+The palette includes required colors and every literal color used by the
+current fleet or its incoming-line list. Remaining slots are randomly selected
+from possibleColors. Digits bind to distinct colors within that palette. A
+literal can match a numbered group's color. A map is invalid if it asks for
+more distinct numbered groups or mandatory literal colors than the palette
+allows, or if required colors cannot appear in a fleet.
 
-Death-cascade digits, magic-shot chain peaks and combo streaks multiply enemy
-points after this level value is chosen. Defeat counts still count actual
-enemies, not multiplied score weight.
+Orange remains limited to one live enemy. Validation chooses digit bindings
+that respect that limit. Incoming Orange cells remain blank while an Orange is
+already alive. A cleared color stays locked for the current clear streak:
+later script cells for that color remain blank, including numbered cells.
+Assignments never change to refill those gaps. Purple summons use the same
+captured active palette and cleared-color locks.
 
-Fleet-clear bonus rises linearly by level:
+## Two independent sequences
 
-```text
-fleet-clear bonus = 10000 * level
-```
+Each level has separate fleet and incoming-line cursors, both initially zero.
 
-The fleet-clear bonus is not multiplied by death digits, magic-shot chain peaks
-or combo streaks.
+- A fresh fleet consumes one fleetSpawns entry.
+- A successful descent consumes one lineSpawns entry when that list is nonempty.
+- Each cursor wraps back to zero at the end of its own list.
+- Clearing a fleet rerolls numbered colors but does not reset the line cursor.
+- Entering a different level or starting/restarting a run resets both cursors.
+- Pause and failed descents do not consume line entries.
 
-## Movement Changes
+The saved map includes introductory literal fleets followed by numbered
+arrangements. Existing defeat targets and color pools were migrated from the
+previous level assets. Each level has enough scripted fleet enemies to reach
+its defeat target before needing to wrap in ordinary play; incoming lines and
+summons can advance the level sooner.
 
-Fleet base speed scales by level:
+## Progress, presentation and shared state
 
-```text
-fleet speed multiplier = min(2, 1 + 0.03 * (level - 1))
-```
+Defeat targets accumulate across the run. Targets of 20 and 40 mean level 3 is
+earned after 60 total defeats. Excess defeats carry forward and can earn multiple
+levels within one fleet. Score multipliers do not multiply defeated enemies.
+Starting from a later level uses the sum of earlier targets as its baseline.
 
-Default fleet movement is driven by live Green enemies:
+Background images must be imported as sprites under `Assets/Resources`, for
+example `Assets/Resources/Backgrounds/Nebula.png` is referenced as
+`"Backgrounds/Nebula"`. Images retain their proportions and crop to cover the
+screen on desktop and phone layouts. Missing sprite paths are reported as
+errors. The main menu stays black.
 
-```text
-fleet speed = 0.03 * live Green count * fleet speed multiplier
-```
+Soundtrack names refer to the existing registry, such as `AnotherJoe` or
+`Contact`. Missing local audio is skipped; no unrelated track substitutes for a
+restricted pool. Audio recordings remain local-only resources.
 
-That means a Red/Blue-only level-one fleet does not move horizontally until a
-Green exists. Movement ticks stay locked to the song beat; this speed changes
-the distance of each beat tick. The multiplier reaches its cap at level 35.
+`EnemyGrid.Fleet` remains the shared source of live colors, counts, cleared
+rewards and future reservations. The active plan also owns the captured palette,
+number bindings, row dimensions and incoming scripts. Player shot weights ignore
+gaps and use the actual occupied cells' row depths.
 
-## Cooldown Changes
+Bottom bars describe colors that have participated in the current fleet, not
+all possible colors in the level. Cleared colors retain their slots through the
+clear celebration. A color first introduced by a later line joins the current
+fleet's history. Incoming reservations cannot change outgoing bar slots; they
+switch together when the next fleet spawns.
 
-Abilities now schedule integer beat deadlines using `CombatBalance.CooldownBeats`
-and the current track's actual playback position and beat map. Spawning between
-beats aligns the first deadline to the music grid. Green dash and Orange swap
-windups last one beat; their actions also land on a beat. Other animation and
-projectile durations remain independent of the cooldown scheduler.
-
-The ranges below are legacy reference-tempo balance inputs, not runtime timers.
-`CooldownBeats` converts their minimum upward and maximum downward to whole
-beats at 115.03 beats per minute. At level one this yields Red/Blue 5-14 beats,
-Green/Purple 12-17 beats, and Yellow/Orange 3-8 beats. Faster music consequently
-produces faster abilities. Random beat intervals retain per-enemy variation.
-
-Reference cooldown ranges are defined in `CombatBalance.CooldownRange`. The
-current source ranges are multiplied by 0.75, then each level above one subtracts
-0.25 seconds from the maximum. The maximum never goes below the minimum plus
-three seconds.
-
-| Enemy type | Level 1 range | Level 2 range | Level 3 range | Level 4 range | Level 5 range | Level 6 range | Cap |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Red | 2.25-7.50s | 2.25-7.25s | 2.25-7.00s | 2.25-6.75s | 2.25-6.50s | 2.25-6.25s | 2.25-5.25s at level 10 |
-| Blue | 2.25-7.50s | 2.25-7.25s | 2.25-7.00s | 2.25-6.75s | 2.25-6.50s | 2.25-6.25s | 2.25-5.25s at level 10 |
-| Green dash | 6.00-15.00s | 6.00-14.75s | 6.00-14.50s | 6.00-14.25s | 6.00-14.00s | 6.00-13.75s | 6.00-9.00s at level 25 |
-| Purple | 6.00-9.00s | 6.00-9.00s | 6.00-9.00s | 6.00-9.00s | 6.00-9.00s | 6.00-9.00s | Already at cap |
-| Yellow | 1.50-4.50s | 1.50-4.50s | 1.50-4.50s | 1.50-4.50s | 1.50-4.50s | 1.50-4.50s | Already at cap |
-
-Existing countdowns are not shortened when the level changes. New cooldown rolls
-use the current level.
-
-## Visual Changes
-
-The background does not change by level. It stays solid black during the main
-menu, wave arrivals, level changes, pause, and game over.
-
-The level-progress bar continues to show progress toward the next defeated-enemy
-threshold. Color-clear blocks at the bottom are not level thresholds; they track
-the current fleet's color-clear streak.
-
-## Things That Do Not Change By Level
-
-These systems can affect difficulty, scoring or presentation, but they are not
-level-progression rules:
-
-- tier-two promotion, which is driven by same-color group size,
-- combo streak count, which advances once per distinct color destroyed in each shot and resets on misses or player damage,
-- magic charges, which are driven by last-of-color clears,
-- color-clear spawn locks, which are driven by bottom color blocks,
-- leaderboard entries, which are recorded at game over,
-- the editor-only spawn override, which is a development control.
+Run **Candy Cruisers > Run Level Map Checks** for focused validation, or
+**Candy Cruisers > Run Checks** for the full gameplay suite. These checks cover
+parsing, invalid maps, required colors, sparse layouts, numbered bindings,
+independent loops, level/reset behavior, clear locks, defeat targets and shared
+fleet state. Runtime checks cover desktop and phone layouts.

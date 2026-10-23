@@ -5,11 +5,17 @@ The previous version remains available at the `legacy-v1` tag and in the local
 `/Users/johngray/swe/candy-cruisers-v1-archive` checkout. The active project is
 `/Users/johngray/swe/candy-cruisers`. See [Changelog](CHANGELOG.md).
 
-New rows contain at most three distinct colors. Each color appears in one
-adjacent run, with randomized run sizes and color order. Rows spawn five enemies
-wide through level 6, then six enemies wide from level 7 onward. This applies to
-opening fleets, new top rows, and refill batches, not individual Purple summons
-or Yellow transformations.
+Level progression is authored in [Assets/Resources/LevelMap.json](Assets/Resources/LevelMap.json).
+Edit that file and start a new run; no Unity level window or level assets are
+needed. It contains each level's defeat target, active color count, possible and
+required colors, background, music, `fleetSpawns` and `lineSpawns`.
+
+Spawn scripts use `r`, `b`, `g`, `p`, `y`, `o` for literal colors, `0` for a gap,
+and `/` for the next row down. Digits `1`–`6` represent distinct random colors;
+their assignments stay fixed through the fleet and all its incoming lines.
+Both lists loop independently and reset on entering a level or restarting.
+The fleet string determines its own width and row count. See
+[Level Progression](docs/LEVEL_PROGRESSION.md) for the complete format and examples.
 
 Open this folder with Unity 6000.3.24f1, open `Assets/Scenes/Gameplay.unity`, and press Play.
 
@@ -39,7 +45,11 @@ with a floor of minimum + 3 seconds. Source values are authoritative when tuning
 
 For spawn testing, open **Candy Cruisers > Spawn Overrides**. Enable **Override level eligibility**, then check the enemy types you want. These selections replace level unlocks for the next opening fleet, future rows, refill batches, and Purple summons; they do not change existing enemies or Yellow imitation. At least one type must remain selected. Turn the override off to restore normal unlocks. Settings survive Play mode and scene restarts within the current editor session, and the control is excluded from player builds.
 
-The gameplay scene starts empty against a solid black background. After one musical opening beat, ten enemies arrive in two rows of five, using Red/Blue unless a development override is active. Every arriving enemy fades in through a color-matched electric rift over 0.8 seconds, including new rows, refill batches, and Purple summons. After the rift finishes, Blue shields expand from a point in front of the enemy over 0.35 seconds. Their bright near-white cyan arcs become protective when fully powered. The formation reverses and descends only when its leading occupied column touches the playfield border. Empty edge columns allow more travel. Select **Enemy Grid** to adjust **Speed**; fixed Travel Distance is no longer used. The logical grid tracks sixty-six cells, unique enemy identities, occupied neighbors, and available colors.
+Open **Metronomes** in the main or pause menu for independent **Voice metronome** and **Visual metronome** switches. Both default to OFF and save across restarts on desktop and iPhone. Voice ON replaces music with the looping spoken count; OFF restores the regular soundtrack. The counting track is excluded from regular song selection. Visual ON shows the top-right **BEAT** counter during gameplay, highlighting 1, 2, 3, 4 from the current track's beat map and downbeat offset; one is green. F9 toggles voice mode in the Editor and development builds; F10 toggles the visual counter.
+
+Opening fleets build on four and hit full size on one. Full-set refills count the bars into one: two colors animate on three and four, then the fleet grows during the latter half of four and lands at full size on one.
+
+The gameplay scene starts empty against a solid black background. The opening has ten enemies in two rows of five, using Red/Blue unless a development override is active. Opening fleets and refills grow from zero size during beat four and land at full size on the following beat one. Ordinary new rows use a 0.8-second grow-in; Purple summons use a color-matched electric rift with a 0.8-second fade. After arrival finishes, Blue shields expand from a point in front of the enemy over 0.35 seconds. Their bright near-white cyan arcs become protective when fully powered. The formation reverses and descends only when its leading occupied column touches the playfield border. Empty edge columns allow more travel. Select **Enemy Grid** to adjust **Speed**; fixed Travel Distance is no longer used. The logical grid tracks sixty-six cells, unique enemy identities, occupied neighbors, and available colors.
 
 Move with Left/Right arrows or A/D; fire with Space. On touch screens, drag horizontally to move and release a short tap to fire. Mouse dragging/clicking provides the same gesture controls for desktop testing. Movement wraps at the playfield edges; pointer movement takes the shortest wrapped route. The player's body shows the shot color. One tongue can be active at a time, and it follows the player while extending and retracting. The next color is chosen from eligible colors, weighted by all on-screen enemies of each color and their row depth, with lower enemies contributing more. A continuous special-Blue barrier across the occupied formation, including diagonal and mixed paths, limits selection to Blue or enemies below that barrier and doubles Blue's weight. An empty grid disables firing.
 
@@ -75,7 +85,7 @@ Purple cooldowns currently start at 6-9 seconds and Yellow at 1.5-4.5. Special G
 
 Clearing the last enemy of a color grants a magic shot, with up to two charges stored. The player changes color every 0.1 seconds when magic is ready or firing; the level-progress fill follows the player's displayed color. The next shot is a rainbow piercing tongue that hits any color, bypasses shields, and clears each hit enemy's same-color chain. It continues to full reach unless it clears the fleet, then visibly retracts. Misses spend the charge; blocked fire commands do not. Getting hit, clearing the fleet, or restarting resets magic, as in the original. The original color-wheel visual direction is intentionally replaced by the bottom color-clear blocks.
 
-Cleared colors cannot appear in new rows or Purple summons while their color bars are visible. Colored segments at the bottom track consecutive color-clearing shots. A shot that clears no entire color removes all segments when it returns (or is canceled), releasing those colors' spawn locks without removing magic rewards. Returning colors can be cleared again to earn their bars and rewards anew. Each slot occupies 1/N of the full progress-track width, where N is the number of currently unlocked colors with configured enemy art. Seen history resets with each new batch. Override changes cannot bypass active color locks. If only locked colors are selected while enemies remain, the fleet still descends but adds no new row.
+Cleared colors cannot appear in new rows or Purple summons while their color bars are visible. Colored segments at the bottom track consecutive color-clearing shots. A shot that clears no entire color removes all segments when it returns (or is canceled), releasing those colors' spawn locks without removing magic rewards. Returning colors can be cleared again to earn their bars and rewards anew. Each slot occupies 1/N of the full progress-track width, where N is the number of colors participating in the current fleet, including its cleared colors. Colors and counts come from `EnemyGrid.Fleet`. Slots stay fixed during the clear celebration and switch to the reserved palette when the next batch spawns. Override changes cannot bypass active color locks. If only locked colors are selected while enemies remain, the fleet still descends but adds no new row.
 
 Magic shots fire immediately after accepted input and extend/retract four times as fast as normal shots (56/80 world units per second). They remain twice as wide. The wind-up and charge animation are no longer used. The player can move during the shot, repeated fire is blocked, and a hit or game over cancels the active shot. On the final enemy hit, both kinds of tongue visibly retract instead of disappearing. The refill waits for the tongue to return. The player then switches directly to a color guaranteed to appear in the already-planned next batch, without a grey state. When multiple colors will spawn, a different color is preferred. Override edits during the pause affect later spawns, not that reserved batch.
 

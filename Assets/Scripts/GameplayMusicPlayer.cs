@@ -26,7 +26,9 @@ namespace CandyCruisers
             { resourceName = name; beatsPerMinute = tempo; beatOffsetSeconds = offset; relativeMajorTonic = tonic;
                 downbeatOffsetBeats = downbeat; }
         }
-        [SerializeField] private Song[] soundtrack = {
+        [SerializeField] private Song[] soundtrack = CreateDefaultSoundtrack();
+        public static string[] DefaultSoundtrackNames => System.Array.ConvertAll(CreateDefaultSoundtrack(), song => song.resourceName);
+        private static Song[] CreateDefaultSoundtrack() => new[] {
             new Song("DiscoDescent", 115.03f, .08f, 0), new Song("GameplayMusic", 142f, .09f, 8),
             new Song("AnotherJoe", 140f, .1f, 2), new Song("PotentialForAnything", 125f, 0f, 5),
             new Song("Skanska", 128f, 0f, 0),
@@ -38,8 +40,15 @@ namespace CandyCruisers
             new Song("ShootingRobotsInSpace", 136f, .62694f, 0),
             new Song("VertexStage1", 143.55f, .22059f, 0),
             new Song("Contact", 123.05f, .05805f, 2, 0),
-            new Song(CountingResourceName, DefaultBeatsPerMinute, .08f, 0, 0)
+            new Song("ForWhomTheKnellTolls", 140f, .09288f, 11),
+            new Song("AColdSweat", 155f, .09288f, 0),
+            new Song("HeartOfTheCrypt", 145f, .09288f, 3),
+            new Song("StyxAndStones", 130f, .09288f, 4)
         };
+        private static readonly Song CountingSong = new Song(CountingResourceName, DefaultBeatsPerMinute, .08f, 0, 0);
+        private AudioClip countingTrack;
+        private AudioClip CountingTrack => countingTrack != null ? countingTrack :
+            countingTrack = Resources.Load<AudioClip>(CountingResourceName);
         private readonly System.Collections.Generic.List<int> remainingSongs = new System.Collections.Generic.List<int>();
         private readonly System.Random shuffle = new System.Random();
         private readonly System.Collections.Generic.Dictionary<AudioClip, SongBeatMap> beatMaps = new();
@@ -48,6 +57,12 @@ namespace CandyCruisers
         private bool wasInMainMenu;
         private bool menuShuffleStarted;
         private AudioClip carriedMenuTrack;
+        private LevelDefinition appliedLevelDefinition;
+        private bool levelSoundtrackApplied;
+        private System.Collections.Generic.HashSet<string> levelTracks;
+        private bool TrackAllowed(string name) => name != CountingResourceName &&
+            (levelTracks == null || levelTracks.Contains(name));
+        private bool UsesCustomTrack => track != null && TrackAllowed(track.name);
         public int TrackCount => soundtrack.Length;
         [SerializeField, Range(0, 11)] private int customTrackRelativeMajorTonic;
         private Song CurrentSong
@@ -56,6 +71,7 @@ namespace CandyCruisers
             {
                 // Beat timing and key follow the clip actually playing, including the menu carryover.
                 var clip = Source.clip;
+                if (clip != null && clip.name == CountingResourceName) return CountingSong;
                 if (clip != null)
                     foreach (var song in soundtrack)
                         if (song.resourceName == clip.name) return song;
@@ -112,6 +128,20 @@ namespace CandyCruisers
         public static float BeatPulse(float beatPosition, bool offbeat = false) =>
             Mathf.Pow(Mathf.Max(0, Mathf.Cos((beatPosition - (offbeat ? .5f : 0)) * Mathf.PI * 2)), 4);
         public float BeatPosition => BeatPositionAtTime(PlaybackSeconds);
+        public int CurrentBeatInMeasure => BeatInMeasure(BeatPosition, CurrentDownbeatOffsetBeats);
+        public static int BeatInMeasure(float beat, int downbeatOffset) =>
+            ((Mathf.FloorToInt(beat) - downbeatOffset) % BeatsPerMeasure + BeatsPerMeasure) % BeatsPerMeasure + 1;
+        public bool TryAdvancePlayback(AudioClip clip, ref float previousSeconds, out float elapsed)
+        {
+            elapsed = 0;
+            float now = PlaybackSeconds;
+            // Audio buffers can report a small backwards step. Only a real seek releases the clock.
+            if (clip == null || Source.clip != clip || !BeatClockRunning || now < previousSeconds - .05f) return false;
+            now = Mathf.Max(previousSeconds, now);
+            elapsed = now - previousSeconds;
+            previousSeconds = now;
+            return true;
+        }
         public float BeatPositionAtTime(float seconds) => CurrentBeatMap?.BeatAtTime(seconds) ??
             (seconds - CurrentBeatOffset) / FixedBeatDuration;
         public float SecondsAtBeat(float beat) => CurrentBeatMap?.TimeAtBeat(beat) ??
@@ -136,19 +166,23 @@ namespace CandyCruisers
             }
             return durations;
         }
-        public AudioClip MenuTrack => menuTrack != null ? menuTrack :
+        public AudioClip MenuTrack => MetronomeSettings.VoiceEnabled ? CountingTrack : menuTrack != null ? menuTrack :
             resourceMenuTrack != null ? resourceMenuTrack : SelectMenuTrack();
         public AudioClip Track
         {
             get
             {
+                if (MetronomeSettings.VoiceEnabled) return CountingTrack;
                 if (carriedMenuTrack != null) return carriedMenuTrack;
-                if (track != null) return track;
+                if (UsesCustomTrack) return track;
                 if (resourceTrack == null) SelectNextTrack();
                 return resourceTrack;
             }
         }
-        public bool ContainsTrack(string name) => System.Array.Exists(soundtrack, song => song.resourceName == name);
+        public bool ContainsTrack(string name) => name != CountingResourceName &&
+            System.Array.Exists(soundtrack, song => song.resourceName == name);
+        public string[] SoundtrackNames => System.Array.ConvertAll(soundtrack, song => song.resourceName);
+        public bool IsTrackAllowedForLevel(string name) => TrackAllowed(name);
         public void SelectNextTrack()
         {
             carriedMenuTrack = null;
@@ -162,6 +196,7 @@ namespace CandyCruisers
             for (int attempts = 0; attempts < soundtrack.Length; attempts++)
             {
                 if (remainingSongs.Count == 0) RefillShuffleBag();
+                if (remainingSongs.Count == 0) return false;
                 int index = remainingSongs[0]; remainingSongs.RemoveAt(0);
                 var clip = Resources.Load<AudioClip>(soundtrack[index].resourceName);
                 if (clip == null) continue;
@@ -175,7 +210,8 @@ namespace CandyCruisers
         private void RefillShuffleBag()
         {
             remainingSongs.Clear();
-            for (int i = 0; i < soundtrack.Length; i++) remainingSongs.Add(i);
+            for (int i = 0; i < soundtrack.Length; i++)
+                if (TrackAllowed(soundtrack[i].resourceName)) remainingSongs.Add(i);
             for (int i = remainingSongs.Count - 1; i > 0; i--)
             {
                 int j = shuffle.Next(i + 1);
@@ -197,6 +233,7 @@ namespace CandyCruisers
                 for (int offset = 0; offset < soundtrack.Length; offset++)
                 {
                     int index = (start + offset) % soundtrack.Length;
+                    if (soundtrack[index].resourceName == CountingResourceName) continue;
                     resourceMenuTrack = Resources.Load<AudioClip>(soundtrack[index].resourceName);
                     if (resourceMenuTrack == null) continue;
                     songIndex = index;
@@ -228,29 +265,24 @@ namespace CandyCruisers
         private void Update()
         {
             if ((Application.isEditor || Debug.isDebugBuild) && Input.GetKeyDown(KeyCode.F8)) SkipCurrentSong();
-            if ((Application.isEditor || Debug.isDebugBuild) && Input.GetKeyDown(KeyCode.F9)) PlayCountingMetronome();
             UpdatePlayback();
         }
-        public bool PlayCountingMetronome()
+        public bool PlayCountingMetronome() => SetVoiceMetronome(true);
+        public bool SetVoiceMetronome(bool enabled)
         {
-            if (!(Application.isEditor || Debug.isDebugBuild) || !InGameplayRun || track != null) return false;
-            var clip = Resources.Load<AudioClip>(CountingResourceName);
-            if (clip == null) return false;
-            carriedMenuTrack = null;
-            resourceTrack = clip;
-            songIndex = System.Array.FindIndex(soundtrack, song => song.resourceName == CountingResourceName);
-            remainingSongs.Remove(songIndex);
-            Source.Stop();
-            Source.clip = null;
+            if (session == null || session.OpeningWarningActive ||
+                session.State != GameSession.RunState.MainMenu && !InGameplayRun) return false;
+            if (enabled && CountingTrack == null) return false;
+            MetronomeSettings.VoiceEnabled = enabled;
             UpdatePlayback();
             return true;
         }
         public bool SkipCurrentSong()
         {
-            if (!(Application.isEditor || Debug.isDebugBuild) || session == null ||
+            if (MetronomeSettings.VoiceEnabled || !(Application.isEditor || Debug.isDebugBuild) || session == null ||
                 session.OpeningWarningActive || soundtrack.Length < 2) return false;
             bool inMenu = session.State == GameSession.RunState.MainMenu;
-            if (inMenu ? menuTrack != null : !InGameplayRun || track != null) return false;
+            if (inMenu ? menuTrack != null : !InGameplayRun || UsesCustomTrack) return false;
             if (inMenu && !menuShuffleStarted)
             {
                 songIndex = System.Array.FindIndex(soundtrack, song => song.resourceName == MenuTrack?.name);
@@ -281,6 +313,7 @@ namespace CandyCruisers
             EnsureSource();
             if (PreviewTime.HasValue) return;
             if (session == null) session = GetComponent<GameSession>();
+            ApplyLevelSoundtrack();
             if (session != null && session.OpeningWarningActive)
             {
                 source.Stop();
@@ -302,7 +335,7 @@ namespace CandyCruisers
                 return;
             }
             bool inMenu = session != null && session.State == GameSession.RunState.MainMenu;
-            if (wasInMainMenu && InGameplayRun && source.clip != null)
+            if (wasInMainMenu && InGameplayRun && source.clip != null && TrackAllowed(source.clip.name))
             {
                 // Adopt the menu song without stopping, seeking or replaying its AudioSource.
                 carriedMenuTrack = source.clip;
@@ -316,6 +349,7 @@ namespace CandyCruisers
             if (clip == null)
             {
                 source.Stop();
+                source.clip = null;
                 wasInRun = false;
                 return;
             }
@@ -366,9 +400,9 @@ namespace CandyCruisers
             else if (shouldPlay)
             {
                 if (pausedSource) { source.UnPause(); pausedSource = false; }
-                else if (!source.isPlaying && InGameplayRun && (track == null || carriedMenuTrack != null))
+                else if (!source.isPlaying && InGameplayRun && (!UsesCustomTrack || carriedMenuTrack != null))
                 {
-                    if (track != null) carriedMenuTrack = null;
+                    if (UsesCustomTrack) carriedMenuTrack = null;
                     else SelectNextTrack();
                     wasInRun = false;
                     // Configure the next clip on the next frame, without restarting the run or its beat effects.
@@ -389,6 +423,35 @@ namespace CandyCruisers
             wasInRun = false;
         }
 
+        private void ApplyLevelSoundtrack()
+        {
+            if (!InGameplayRun)
+            {
+                if (session != null && session.State == GameSession.RunState.MainMenu && levelSoundtrackApplied)
+                {
+                    levelTracks = null;
+                    levelSoundtrackApplied = false;
+                    appliedLevelDefinition = null;
+                    remainingSongs.Clear();
+                }
+                return;
+            }
+            var definition = session.CurrentLevelDefinition;
+            if (!levelSoundtrackApplied && definition == null) return;
+            if (levelSoundtrackApplied && appliedLevelDefinition == definition) return;
+            appliedLevelDefinition = definition;
+            levelSoundtrackApplied = true;
+            var names = definition != null ? definition.possibleSoundtrackTracks : null;
+            levelTracks = names != null && names.Length > 0 ? new System.Collections.Generic.HashSet<string>(names) : null;
+            remainingSongs.Clear();
+            if (carriedMenuTrack != null && !TrackAllowed(carriedMenuTrack.name)) carriedMenuTrack = null;
+            if (resourceTrack != null && !TrackAllowed(resourceTrack.name)) resourceTrack = null;
+            RefillShuffleBag();
+            var retained = carriedMenuTrack != null ? carriedMenuTrack : resourceTrack;
+            if (retained != null)
+                remainingSongs.Remove(System.Array.FindIndex(soundtrack, song => song.resourceName == retained.name));
+        }
+
         private void EnsureSource()
         {
             if (source != null) return;
@@ -402,7 +465,8 @@ namespace CandyCruisers
             if (source == null) return;
             source.playOnAwake = false;
             bool dying = session != null && session.State == GameSession.RunState.Dying;
-            source.loop = !dying && (!InGameplayRun || track != null && carriedMenuTrack == null);
+            source.loop = !dying && (MetronomeSettings.VoiceEnabled || !InGameplayRun ||
+                UsesCustomTrack && (carriedMenuTrack == null || carriedMenuTrack == track));
             source.spatialBlend = 0;
             source.dopplerLevel = 0;
             source.pitch = dying ? Mathf.Pow(DeathMinimumPitch, session.GameOverBlackoutOpacity) : 1;

@@ -9,6 +9,7 @@ namespace CandyCruisers.Editor
         public static void Run()
         {
             CheckFullSetDrain();
+            CheckRandomOrder();
             var wave = new FullSetCelebration();
             var colors = new List<EnemyColor> { EnemyColor.Green, EnemyColor.Blue, EnemyColor.Red };
             var order = new List<EnemyColor>(colors);
@@ -111,6 +112,47 @@ namespace CandyCruisers.Editor
             var bar = GameSession.ColorClearBarSlotRect(0, 0, 100, 4, 0);
             Check(!PlayerCelebrationFlip.TryDirection(23, 33, bar.xMin, bar.xMax, 0, out clockwise),
                 "The gap between visible bars does not count as support");
+        }
+
+        private static void CheckRandomOrder()
+        {
+            var gameplayRandom = UnityEngine.Random.state;
+            var expectedRandom = UnityEngine.Random.value;
+            UnityEngine.Random.state = gameplayRandom;
+            for (int count = 2; count <= FullSetCelebration.MaxRewardBars; count++)
+            foreach (int frameRate in new[] { 30, 60, 120 })
+            {
+                var colors = new List<EnemyColor>();
+                for (int i = 0; i < count; i++) colors.Add((EnemyColor)i);
+                var original = new List<EnemyColor>(colors);
+                var removed = new List<EnemyColor>();
+                var spiked = new List<EnemyColor>();
+                var wave = new FullSetCelebration();
+                wave.ColorRemoved += removed.Add;
+                wave.BarSpiked += (color, duration) => spiked.Add(color);
+                wave.Begin(colors, duration: .4f + count * .5f, holdDuration: .4f,
+                    order: FullSetCelebration.BarOrder.Random);
+                Check(!wave.FinalBarOverlaps, "Shuffled bars rise individually instead of anticipating a neighboring slot");
+                var resting = new Rect(20, 100, 40, 5);
+                wave.Tick(.399f);
+                foreach (var color in colors)
+                    Check(wave.Visible(color) && wave.Present(color, resting) == resting,
+                        "Random order keeps every bar still and lit during the hold");
+                for (int frame = 0; frame < (count * .5f + .1f) * frameRate; frame++) wave.Tick(1f / frameRate);
+                Check(wave.Finished && removed.Count == count && new HashSet<EnemyColor>(removed).Count == count &&
+                    spiked.Count == count && spiked.TrueForAll(color => removed.Contains(color)),
+                    "Shuffled bars spike and clear exactly once at desktop and phone frame rates");
+                bool ordered = true;
+                for (int i = 0; i < count; i++) if (removed[i] != colors[i]) ordered = false;
+                Check(!ordered && wave.LastColor == removed[count - 1],
+                    "The shuffled variation differs from the wave and exposes its actual final bar");
+                Check(colors.TrueForAll(color => original[colors.IndexOf(color)] == color),
+                    "Choosing presentation order preserves the caller's fixed display slots");
+                wave.Tick(100); Check(removed.Count == count && spiked.Count == count,
+                    "A completed shuffled sequence cannot repeat rewards or removals");
+            }
+            Check(UnityEngine.Random.value == expectedRandom, "Animation variation does not consume gameplay randomness");
+            UnityEngine.Random.state = gameplayRandom;
         }
 
         private static void CheckFullSetDrain()

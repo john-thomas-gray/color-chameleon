@@ -14,6 +14,18 @@ namespace CandyCruisers
         [SerializeField] private Sprite specialSprite;
         private EnemyGrid grid;
         private EnemyGridMovement movement;
+        private FleetState Fleet => (grid != null ? grid : grid = GetComponent<EnemyGrid>()).Fleet;
+        private LevelDefinition Definition => GetComponent<GameSession>()?.CurrentLevelDefinition;
+        private bool UsesLevelDefinition
+        {
+            get
+            {
+#if UNITY_EDITOR
+                if (SpawnOverride.Enabled) return false;
+#endif
+                return Definition != null;
+            }
+        }
         public const int OrangeSpawnOdds = 75;
         public event System.Action BottomReached;
 
@@ -30,7 +42,8 @@ namespace CandyCruisers
         public Sprite AppearanceSprite(EnemyColor color, bool special = false) =>
             special || color == EnemyColor.Orange ? SpecialSprite : Prefab(color)?.GetComponentInChildren<SpriteRenderer>()?.sprite;
         public int Level => GetComponent<GameSession>()?.Progress.Level ?? 1;
-        public int CurrentRowWidth => RunProgress.RowWidthForLevel(Level);
+        public int CurrentRowWidth => Fleet.Count > 0 && Fleet.ActivePlan != null ?
+            Fleet.ActivePlan.Columns : RunProgress.RowWidthForLevel(Level);
         public void ApplyAppearance(GridEnemy enemy)
         {
             var prefab = Prefab(enemy.Color);
@@ -43,6 +56,9 @@ namespace CandyCruisers
 
         public System.Collections.Generic.List<EnemyColor> UnlockedColors()
         {
+            if (UsesLevelDefinition)
+                return Fleet.SpawnPalette != null ? new System.Collections.Generic.List<EnemyColor>(Fleet.SpawnPalette) :
+                    LevelDefinition.UniqueColors(Definition.possibleColors);
             var eligible = new System.Collections.Generic.List<EnemyColor>();
             foreach (EnemyColor color in System.Enum.GetValues(typeof(EnemyColor)))
             {
@@ -58,7 +74,7 @@ namespace CandyCruisers
         private System.Collections.Generic.List<EnemyColor> SpawnColors(bool newCycle = false)
         {
             if (grid == null) grid = GetComponent<EnemyGrid>();
-            var colors = UnlockedColors();
+            var colors = UsesLevelDefinition && newCycle ? LevelDefinition.UniqueColors(Definition.possibleColors) : UnlockedColors();
             colors.RemoveAll(color => (!newCycle && grid.IsColorCleared(color)) || Prefab(color) == null ||
                 Prefab(color).GetComponentInChildren<SpriteRenderer>() == null);
             return colors;
@@ -158,9 +174,47 @@ namespace CandyCruisers
                 return false;
             }
             if (!grid.TryDescend()) return false;
-            if (colors.Count > 0) SpawnRow(0, colors, rowWidth);
+            if (Fleet.ActivePlan != null && Fleet.ActivePlan.IsScripted) SpawnScriptedLine();
+            else if (colors.Count > 0) SpawnRow(0, colors, rowWidth);
             session?.CheckPlayerContact();
             return true;
+        }
+
+        private int sequenceLevel = -1;
+        private int nextFleet, nextLine;
+        public void ResetSequences() { sequenceLevel = -1; nextFleet = nextLine = 0; }
+        private void EnsureSequenceLevel()
+        {
+            if (sequenceLevel == Level) return;
+            sequenceLevel = Level; nextFleet = nextLine = 0;
+        }
+
+        public FleetPlan PlanNextFleet()
+        {
+            if (!UsesLevelDefinition)
+                return SnapshotPlan(Level == RunProgress.MinLevel ? PlanOpening() : PlanBatch(GetComponent<GameSession>().Progress.BatchRows));
+            EnsureSequenceLevel();
+            var definition = Definition;
+            var errors = definition.ValidationErrors();
+            if (errors.Count > 0) { Debug.LogError(string.Join(" ", errors), this); return null; }
+            var plan = SpawnScript.Plan(definition, definition.fleetSpawns[nextFleet]);
+            if (plan == null) { Debug.LogError("Cannot resolve the scripted fleet for level " + Level, this); return null; }
+            foreach (var color in plan.SpawnPalette)
+                if (Prefab(color) == null || Prefab(color).GetComponentInChildren<SpriteRenderer>() == null)
+                { Debug.LogError("Missing enemy prefab for scripted color " + color, this); return null; }
+            nextFleet = (nextFleet + 1) % definition.fleetSpawns.Length;
+            return plan;
+        }
+
+        private void SpawnScriptedLine()
+        {
+            var round = Fleet.ActivePlan;
+            if (round.LineSpawns.Count == 0) return;
+            var cells = SpawnScript.Decode(round.LineSpawns[nextLine % round.LineSpawns.Count], round.Bindings);
+            nextLine = (nextLine + 1) % round.LineSpawns.Count;
+            for (int column = 0; column < cells.Length; column++)
+                if (cells[column].HasValue && !Fleet.IsCleared(cells[column].Value) && CanSpawn(cells[column].Value, column, 0))
+                    Spawn(cells[column].Value, column, 0);
         }
 
         public bool SpawnBatch(int rows)
@@ -173,17 +227,22 @@ namespace CandyCruisers
             var colors = SpawnColors(true);
             if (colors.Count != 2 || !colors.Contains(EnemyColor.Red) || !colors.Contains(EnemyColor.Blue))
                 return PlanBatch(2, RunProgress.StandardRowWidth);
+            return RedBlueOpening();
+        }
+
+        private static EnemyColor[] RedBlueOpening()
+        {
             int rowWidth = RunProgress.StandardRowWidth;
             var plan = new EnemyColor[2 * rowWidth];
             for (int i = 0; i < plan.Length; i++)
-                plan[i] = ((i % rowWidth < (rowWidth + 1) / 2) == (i / rowWidth == 0))
+                plan[i] = ((i % rowWidth != rowWidth / 2) == (i / rowWidth == 0))
                     ? EnemyColor.Blue : EnemyColor.Red;
             return plan;
         }
 
         public EnemyColor[] PlanBatch(int rows)
         {
-            return PlanBatch(rows, CurrentRowWidth);
+            return PlanBatch(rows, RunProgress.RowWidthForLevel(Level));
         }
 
         private EnemyColor[] PlanBatch(int rows, int rowWidth)
@@ -209,49 +268,98 @@ namespace CandyCruisers
         private static EnemyColor[] PlanOrangeRow(System.Collections.Generic.List<EnemyColor> colors, int rowWidth)
         {
             var row = new EnemyColor[rowWidth];
+            if (rowWidth < RunProgress.WideRowWidth && colors.Count == 1)
+            {
+                // AAOAA keeps the unique Orange and caps both ordinary runs at two.
+                for (int column = 0; column < rowWidth; column++)
+                    row[column] = column == rowWidth / 2 ? EnemyColor.Orange : colors[0];
+                return row;
+            }
             bool left = Random.Range(0, 2) == 0;
             row[left ? 0 : rowWidth - 1] = EnemyColor.Orange;
-            if (rowWidth > 1) System.Array.Copy(PlanRow(colors, rowWidth - 1, 2), 0, row, left ? 1 : 0, rowWidth - 1);
+            if (rowWidth > 1) System.Array.Copy(PlanRow(colors, rowWidth - 1, 2, null,
+                MaxRunLengthForWidth(rowWidth)), 0, row, left ? 1 : 0, rowWidth - 1);
             return row;
         }
 
-        private static EnemyColor[] PlanRow(System.Collections.Generic.List<EnemyColor> eligible, int rowWidth, int maxGroups = 3)
+        private static int MaxRunLengthForWidth(int rowWidth) => rowWidth < RunProgress.WideRowWidth ? 2 : rowWidth;
+
+        private static EnemyColor[] PlanRow(System.Collections.Generic.List<EnemyColor> eligible, int rowWidth, int maxGroups = 3,
+            System.Collections.Generic.List<EnemyColor> required = null, int maxRunLength = 0)
         {
             var colors = new System.Collections.Generic.List<EnemyColor>(eligible);
             rowWidth = Mathf.Clamp(rowWidth, 1, GridModel.Columns);
+            if (maxRunLength == 0) maxRunLength = MaxRunLengthForWidth(rowWidth);
+            // A single eligible color cannot fill a row without exceeding the cap.
+            if (colors.Count == 1) maxRunLength = rowWidth;
             int groups = Mathf.Min(maxGroups, colors.Count, rowWidth);
-            var sizes = new int[groups];
-            // Sample distinct colors without replacement, then allocate contiguous runs.
+            if (required != null)
+                for (int i = 0; i < required.Count; i++)
+                {
+                    int index = colors.IndexOf(required[i]);
+                    var swap = colors[i]; colors[i] = colors[index]; colors[index] = swap;
+                }
+            // Select distinct colors first so required colors retain their guaranteed appearance.
             for (int i = 0; i < groups; i++)
             {
-                int selected = Random.Range(i, colors.Count);
+                int selected = required != null && i < required.Count ? i : Random.Range(i, colors.Count);
                 var swap = colors[i]; colors[i] = colors[selected]; colors[selected] = swap;
-                sizes[i] = 1;
             }
+            var runColors = colors.GetRange(0, groups);
+            // Five slots with two colors need three runs: ABA or BAB.
+            if (groups * maxRunLength < rowWidth)
+            {
+                if (Random.Range(0, 2) == 0) runColors.Reverse();
+                runColors.Add(runColors[0]);
+            }
+            groups = runColors.Count;
+            var sizes = new int[groups];
+            for (int i = 0; i < groups; i++) sizes[i] = 1;
             var expandable = new System.Collections.Generic.List<int>();
-            for (int i = 0; i < groups; i++) if (colors[i] != EnemyColor.Orange) expandable.Add(i);
+            for (int i = 0; i < groups; i++) if (runColors[i] != EnemyColor.Orange && maxRunLength > 1) expandable.Add(i);
             for (int i = groups; i < rowWidth; i++)
-                sizes[expandable.Count > 0 ? expandable[Random.Range(0, expandable.Count)] : 0]++;
+            {
+                int selected = expandable[Random.Range(0, expandable.Count)];
+                if (++sizes[selected] >= maxRunLength) expandable.Remove(selected);
+            }
             var row = new EnemyColor[rowWidth];
             int column = 0;
             for (int group = 0; group < groups; group++)
-                for (int i = 0; i < sizes[group]; i++) row[column++] = colors[group];
+                for (int i = 0; i < sizes[group]; i++) row[column++] = runColors[group];
             return row;
         }
 
         public bool SpawnBatch(EnemyColor[] plan)
         {
-            if (grid == null) grid = GetComponent<EnemyGrid>();
             int rowWidth = RowWidthForPlan(plan);
-            if (grid.Model.Count != 0 || plan == null || plan.Length == 0 || plan.Length > GridModel.Rows * GridModel.Columns ||
-                rowWidth == 0 || plan.Length / rowWidth > GridModel.Rows) return false;
-            foreach (var color in plan)
-                if (!System.Enum.IsDefined(typeof(EnemyColor), color) || Prefab(color) == null || Prefab(color).GetComponentInChildren<SpriteRenderer>() == null) return false;
-            grid.BeginColorCycle();
-            for (int start = 0; start < plan.Length; start += rowWidth)
+            return rowWidth > 0 && SpawnBatch(new FleetPlan(plan, rowWidth));
+        }
+
+        public FleetPlan SnapshotPlan(EnemyColor[] plan)
+        {
+            int width = RowWidthForPlan(plan);
+            return width > 0 ? new FleetPlan(plan, width) : null;
+        }
+
+        public bool SpawnBatch(FleetPlan plan)
+        {
+            if (grid == null) grid = GetComponent<EnemyGrid>();
+            if (Fleet.Count != 0 || plan == null) return false;
+            var cells = plan.CopyCells();
+            foreach (var color in cells)
+                if (color.HasValue && (!System.Enum.IsDefined(typeof(EnemyColor), color.Value) || Prefab(color.Value) == null ||
+                    Prefab(color.Value).GetComponentInChildren<SpriteRenderer>() == null)) return false;
+            Fleet.Begin(plan, UsesLevelDefinition);
+            int rowWidth = plan.Columns;
+            if (plan.IsScripted)
+            {
+                for (int i = 0; i < cells.Length; i++)
+                    if (cells[i].HasValue) Spawn(cells[i].Value, i % rowWidth, i / rowWidth);
+            }
+            else for (int start = 0; start < cells.Length; start += rowWidth)
             {
                 var row = new EnemyColor[rowWidth];
-                System.Array.Copy(plan, start, row, 0, rowWidth);
+                for (int column = 0; column < rowWidth; column++) row[column] = cells[start + column].Value;
                 SpawnPlannedRow(row, start / rowWidth);
             }
             return true;
@@ -260,15 +368,16 @@ namespace CandyCruisers
         public int RowWidthForPlan(EnemyColor[] plan)
         {
             if (plan == null || plan.Length == 0) return 0;
-            int rowWidth = CurrentRowWidth;
-            if (plan.Length % rowWidth == 0) return rowWidth;
-            if (plan.Length % RunProgress.StandardRowWidth == 0) return RunProgress.StandardRowWidth;
-            return plan.Length % RunProgress.WideRowWidth == 0 ? RunProgress.WideRowWidth : 0;
+            int rowWidth = RunProgress.RowWidthForLevel(Level);
+            if (plan.Length % rowWidth == 0 && plan.Length / rowWidth <= GridModel.Rows) return rowWidth;
+            if (plan.Length % RunProgress.StandardRowWidth == 0 && plan.Length / RunProgress.StandardRowWidth <= GridModel.Rows)
+                return RunProgress.StandardRowWidth;
+            return plan.Length % RunProgress.WideRowWidth == 0 && plan.Length / RunProgress.WideRowWidth <= GridModel.Rows ? RunProgress.WideRowWidth : 0;
         }
 
         private void SpawnRow(int row, System.Collections.Generic.List<EnemyColor> colors, int rowWidth)
         {
-            bool eligibleOrange = colors.Remove(EnemyColor.Orange) && grid.Model.ColorCount(EnemyColor.Orange) == 0;
+            bool eligibleOrange = colors.Remove(EnemyColor.Orange) && grid.Fleet.ColorCount(EnemyColor.Orange) == 0;
             bool orange = false;
             // One trial per new slot, stopping once the unique Orange is selected.
             for (int slot = 0; eligibleOrange && !orange && slot < rowWidth; slot++)
@@ -283,7 +392,7 @@ namespace CandyCruisers
         }
 
         private bool CanSpawn(EnemyColor color, int column, int row) =>
-            color != EnemyColor.Orange || grid.Model.ColorCount(EnemyColor.Orange) == 0 && !grid.Model.HasOrangeNeighbor(column, row);
+            color != EnemyColor.Orange || grid.Fleet.ColorCount(EnemyColor.Orange) == 0 && !grid.Model.HasOrangeNeighbor(column, row);
 
         private void SpawnPlannedRow(EnemyColor[] plan, int row)
         {

@@ -13,18 +13,38 @@ namespace CandyCruisers
         private int dashDirection;
         private bool feedingImitation;
         private float phaseRemaining, shiftRemaining, clock;
+        public const float SpawnSeconds = .8f;
+        private float phaseDuration = SpawnSeconds;
+        public float SpawnSecondsRemaining => phaseRemaining;
+        private GameplayMusicPlayer arrivalMusic;
+        private AudioClip arrivalClip;
+        private float arrivalEndSeconds, arrivalMusicSeconds;
         private EnemyColor phaseColor;
         private bool warpArrival;
         private bool growing;
+        private bool beatLanding;
         private Vector3 restingBodyScale;
         public bool IsWarping => IsPhasing && warpArrival;
         public void GrowIn(EnemyColor color)
         {
             if (!growing) restingBodyScale = body.transform.localScale;
             growing = true;
+            beatLanding = false;
             warpArrival = false;
-            phaseRemaining = .8f;
+            arrivalMusic = null;
+            phaseDuration = SpawnSeconds;
+            phaseRemaining = SpawnSeconds;
             Tick(0, color, 0);
+        }
+        public void SynchronizeArrival(GameplayMusicPlayer music, float finishSeconds, float duration = SpawnSeconds)
+        {
+            phaseDuration = Mathf.Max(.0001f, duration);
+            beatLanding = true;
+            arrivalMusic = music;
+            arrivalClip = music.Source.clip;
+            arrivalEndSeconds = finishSeconds;
+            arrivalMusicSeconds = music.PlaybackSeconds;
+            Tick(0, GetComponent<GridEnemy>().Color, 0);
         }
         private int shiftDirection;
         private GridEnemy target;
@@ -153,14 +173,16 @@ namespace CandyCruisers
             return line;
         }
         public bool IsPhasing => phaseRemaining > 0;
-        public float SpawnOpacity => 1 - phaseRemaining / .8f;
+        public float SpawnOpacity => 1 - phaseRemaining / phaseDuration;
         public void PhaseIn(EnemyColor color, EnemyColor? effectColor = null)
         {
             if (growing) body.transform.localScale = restingBodyScale;
             growing = false;
             warpArrival = true;
             phaseColor = effectColor ?? color;
-            phaseRemaining = .8f;
+            arrivalMusic = null;
+            phaseDuration = SpawnSeconds;
+            phaseRemaining = SpawnSeconds;
             Tick(0, color, 0);
         }
         public void SpeedShift(int direction) { shiftDirection = direction; shiftRemaining = .35f; }
@@ -175,7 +197,17 @@ namespace CandyCruisers
                     greenRestingRotation * Quaternion.Euler(0, 0, -360 * turn) : greenRestingRotation;
             }
             clock += seconds;
-            phaseRemaining = Mathf.Max(0, phaseRemaining - seconds);
+            if (arrivalMusic != null && arrivalMusic.TryAdvancePlayback(arrivalClip, ref arrivalMusicSeconds, out _))
+            {
+                phaseRemaining = Mathf.Clamp(arrivalEndSeconds - arrivalMusicSeconds, 0, phaseDuration);
+            }
+            else
+            {
+                // Track changes and seeks fall back to the remaining visual time without stalling.
+                arrivalMusic = null;
+                phaseRemaining = Mathf.Max(0, phaseRemaining - Mathf.Max(0, seconds));
+            }
+            if (phaseRemaining <= 0) arrivalMusic = null;
             shiftRemaining = Mathf.Max(0, shiftRemaining - seconds);
             imitationRemaining = Mathf.Max(0, imitationRemaining - seconds);
             revealRemaining = Mathf.Max(0, revealRemaining - seconds);
@@ -199,7 +231,7 @@ namespace CandyCruisers
             if (growing)
             {
                 float t = SpawnOpacity - 1;
-                float scale = 1 + 2.2f * t * t * t + 1.2f * t * t;
+                float scale = beatLanding ? Mathf.Pow(SpawnOpacity, 3) : 1 + 2.2f * t * t * t + 1.2f * t * t;
                 body.transform.localScale = restingBodyScale * Mathf.Max(0, scale);
                 if (phaseRemaining <= 0) { body.transform.localScale = restingBodyScale; growing = false; }
             }

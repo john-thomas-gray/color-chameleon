@@ -72,14 +72,22 @@ then gameplay shuffles the remaining recordings. The playlist contains Another
 Joe, Potential For Anything, Disco Descent, the original GameplayMusic track,
 Skanska, The Third Kind, Down To Earth Part 1, Until I Collapse, War On Activism,
 Intergalactic Emotional Breakdown, Shooting Robots in Space, Vertex Stage 1, and
-the 55.380-288.206-second gameplay edit of Contact, plus the developer counting
-metronome. Contact's edit begins and ends on analyzed transition beats, with a
+the 55.380-288.206-second gameplay edit of Contact, For Whom the Knell Tolls
+(Dead Ringer), A Cold Sweat (3-3 Cold), Heart of the Crypt (4-2), Styx and Stones
+(4-1). The spoken counting metronome is excluded from this playlist. Contact's edit begins and ends on analyzed transition beats, with a
 five-millisecond input and 20-millisecond output ramp preventing cut clicks. The
 carried menu song counts as the first entry
 in the shuffle bag. Each song finishes before the next
 begins. Every shuffle bag includes each song once and avoids an immediate repeat
 at its boundary.
 Playlist randomness does not consume gameplay random numbers.
+The **Metronomes** panel in the pause menu has independent saved voice
+and visual switches, both OFF by default. Voice ON replaces music with the looping
+spoken count and retains its own beat map and downbeat offset; OFF restores regular
+song selection. It bypasses the level playlist only while explicitly enabled and
+cannot enter regular shuffle bags. Visual ON displays the beat counter during
+unpaused gameplay, following whichever recording is active. While paused, F9 toggles the voice switch and F10 toggles the visual switch.
+These controls are unavailable on the main menu and during unpaused gameplay.
 F8 skips to the next song on the menu or during gameplay in the Unity editor and
 development builds, including while paused. Menu skips stay on the menu and are
 not reset by the temporary starting-song lock. The opening warning still blocks
@@ -113,6 +121,11 @@ Maps for We Are Not Anonymous, Poison Was the Cure, and Drive Slow are retained,
 but those recordings are no longer in the playlist.
 Contact uses a generated low-frequency onset map for its 232.826-second edit;
 its first detected beat is the downbeat.
+The four added Crypt of the Necrodancer recordings use the resource names
+`ForWhomTheKnellTolls`, `AColdSweat`, `HeartOfTheCrypt`, and `StyxAndStones`.
+Each has a map generated from the full, unchanged supplied recording and a
+measured loudness gain. Their fallback tempos are 140, 155, 145, and 130 beats per
+minute, respectively.
 Restoring a recording and its soundtrack entry enables its matching map again.
 These are machine estimates: syncopation, sparse introductions, fills and fading
 outros can still produce misplaced or half/double-time beats.
@@ -160,16 +173,19 @@ current-track downbeat. Partial sets spike every earned bar at once, keep the
 player flash white, and power all earned bars down together until the spawn
 downbeat. During that wind-down the bars stop beat-pulsing, lose their glow, and
 settle back to their default unpowered color. They play one replaceable `BarPowerDown` cue stretched to
-that whole power-down span. Complete sets still reserve the final regular bar removal one
-beat before the spawn downbeat; earned-life clears retain two reserved beats.
+that whole power-down span. Complete sets count one bar per beat into the
+downbeat: with two colors, the bars animate on three and four. The last bar
+uses the first half of four, and the fleet grows during the latter half to reach
+full size on one. Earned-life clears use the same timing.
 The new spare enters from offscreen, launches at the final bar spike, and flies
-to the life row over two musical beats. The complete-set bar span is divided
-evenly across the earned bars. Each slot starts white, flashes that bar's color
+to the life row over two musical beats. Complete-set bar starts are one beat
+apart; the last bar has a shorter span to leave room for fleet growth.
+Each slot starts white, flashes that bar's color
 for the second half, and removes the bar at the slot boundary. The last bar is
 reserved for the final flash. The transition ends on that color, which becomes
 the player's color as the new fleet appears. Complete sets retain their jackpot
-celebration and play `BarPowerUp` at each
-removal, ascending along the major scale. Each power-up cue sweeps upward in
+celebration and play `BarPowerUp` at the start of each bar animation,
+ascending along the major scale. Each power-up cue sweeps upward in
 pitch; both cues can be replaced independently in the sound settings.
 Tongue return
 and lingering death particles do not extend this beat-count deadline; pause freezes it.
