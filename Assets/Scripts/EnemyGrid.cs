@@ -14,37 +14,18 @@ namespace CandyCruisers
         { missilePrefab = missile; shieldSprite = shield; }
         public GridModel Model { get; } = new GridModel();
         private readonly Dictionary<int, GridEnemy> views = new Dictionary<int, GridEnemy>();
-        private readonly HashSet<EnemyColor> clearedColors = new HashSet<EnemyColor>();
-        private readonly HashSet<EnemyColor> seenColors = new HashSet<EnemyColor>();
+        public FleetState Fleet => Model.Fleet;
         private BlueGroupShield groupShield;
         private readonly List<PresentationCue> deaths = new List<PresentationCue>();
         public bool HasDeathEffects => deaths.Exists(effect => effect != null && !effect.Finished);
         public float Spacing => spacing;
         public BlueGroupShield GroupShield => groupShield;
-        public List<EnemyColor> SeenColors()
-        {
-            var colors = new List<EnemyColor>(seenColors);
-            colors.Sort();
-            return colors;
-        }
-        public bool IsColorCleared(EnemyColor color) => clearedColors.Contains(color);
+        public List<EnemyColor> SeenColors() => Fleet.CopyColors();
+        public bool IsColorCleared(EnemyColor color) => Fleet.IsCleared(color);
         public bool HasColorClearBar(EnemyColor color) => IsColorCleared(color);
-        public bool AllColorClearBarsFilled
-        {
-            get
-            {
-                if (seenColors.Count == 0) return false;
-                foreach (var color in seenColors)
-                    if (!clearedColors.Contains(color)) return false;
-                return true;
-            }
-        }
-        public void ResetColorClearStreak() => clearedColors.Clear();
-        public void BeginColorCycle()
-        {
-            clearedColors.Clear();
-            seenColors.Clear();
-        }
+        public bool AllColorClearBarsFilled => Fleet.AllColorsCleared;
+        public void ResetColorClearStreak() => Fleet.ResetClearStreak();
+        public void BeginColorCycle() => Fleet.ResetCycle();
         public event System.Action FleetCleared;
         public event System.Action<EnemyColor> ColorCleared;
         public event System.Action<EnemyColor> EnemyDestroyed;
@@ -81,8 +62,8 @@ namespace CandyCruisers
                 }
             foreach (var color in new List<EnemyColor>(weights.Keys))
                 if (!eligible.Contains(color)) weights.Remove(color);
-            bool boostGreen = weights.ContainsKey(EnemyColor.Green) && Model.ColorCount(EnemyColor.Green) * 100 > Model.Count * 18;
-            bool boostPurple = weights.ContainsKey(EnemyColor.Purple) && Model.ColorCount(EnemyColor.Purple) * 100 > Model.Count * 18;
+            bool boostGreen = weights.ContainsKey(EnemyColor.Green) && Fleet.ColorCount(EnemyColor.Green) * 100 > Fleet.Count * 18;
+            bool boostPurple = weights.ContainsKey(EnemyColor.Purple) && Fleet.ColorCount(EnemyColor.Purple) * 100 > Fleet.Count * 18;
             if (boostGreen || boostPurple)
             {
                 // Scale once so qualifying colors each receive exactly 1.75x their original weight.
@@ -232,7 +213,8 @@ namespace CandyCruisers
             transform.position -= Vector3.right * shift * worldSpacing;
             foreach (var enemy in views.Values)
             {
-                enemy.SetCell(enemy.Column + shift, enemy.Row);
+                var cell = Model.Find(enemy.Id);
+                enemy.SetCell(cell.Column, cell.Row);
                 enemy.transform.localPosition = CellPosition(enemy.Column, enemy.Row);
             }
             return true;
@@ -242,7 +224,8 @@ namespace CandyCruisers
             if (!Model.TryDescend()) return false;
             foreach (var enemy in views.Values)
             {
-                enemy.SetCell(enemy.Column, enemy.Row + 1);
+                var cell = Model.Find(enemy.Id);
+                enemy.SetCell(cell.Column, cell.Row);
                 enemy.transform.localPosition = CellPosition(enemy.Column, enemy.Row);
             }
             return true;
@@ -257,7 +240,6 @@ namespace CandyCruisers
             }
             views.Add(enemy.Id, enemy);
             enemy.Visuals.Configure(enemy.Visuals.Body);
-            seenColors.Add(enemy.Color);
             enemy.Bind(this);
             enemy.transform.localPosition = CellPosition(enemy.Column, enemy.Row);
             if (missilePrefab != null && shieldSprite != null)
@@ -292,7 +274,7 @@ namespace CandyCruisers
             if (orange == null || other == null || !Model.TryOrangeSwap(id, target.Id)) return false;
             foreach (var enemy in new[] { orange, other })
             {
-                var cell = enemy == orange ? Model.At(other.Column, other.Row) : target;
+                var cell = Model.Find(enemy.Id);
                 enemy.SetCell(cell.Column, cell.Row);
                 enemy.transform.localPosition = CellPosition(cell.Column, cell.Row);
                 enemy.GetComponent<EnemyPresentation>()?.PhaseIn(enemy.Color, EnemyColor.Orange);
@@ -312,7 +294,6 @@ namespace CandyCruisers
         {
             if (!views.TryGetValue(id, out var enemy) || !Model.SetColor(id, color)) return false;
             enemy.SetColor(color);
-            seenColors.Add(color);
             var spawner = GetComponent<EnemyRowSpawner>();
             if (spawner != null) spawner.ApplyAppearance(enemy);
             return true;
@@ -354,7 +335,7 @@ namespace CandyCruisers
                 removedColors.Add(enemy.Color);
                 int animationDepth = depths[clearedId];
                 var match = enemy.Visuals.Match(enemy.Color, animationDepth, multipliers[clearedId]);
-                var defeat = enemy.Visuals.Defeat(enemy.Color, animationDepth, multipliers[clearedId], Model.ColorCount(enemy.Color) == 0);
+                var defeat = enemy.Visuals.Defeat(enemy.Color, animationDepth, multipliers[clearedId], Fleet.ColorCount(enemy.Color) == 0);
                 if (match != null) deaths.Add(match);
                 if (defeat != null) deaths.Add(defeat);
                 views.Remove(clearedId);
@@ -368,21 +349,21 @@ namespace CandyCruisers
             {
                 if (groupShield != null) groupShield.Refresh(this);
                 foreach (EnemyColor removedColor in System.Enum.GetValues(typeof(EnemyColor)))
-                    if (removedColors.Contains(removedColor) && Model.ColorCount(removedColor) == 0)
+                    if (removedColors.Contains(removedColor) && Fleet.ColorCount(removedColor) == 0)
                     {
-                        clearedColors.Add(removedColor);
+                        Fleet.MarkCleared(removedColor);
                         ColorCleared?.Invoke(removedColor);
                     }
                 int scoreWeight = 0;
                 foreach (int clearedId in cleared) scoreWeight += multipliers[clearedId];
-                if (orangeBurst) OrangeBurstCleared?.Invoke(cleared.Count, Model.Count == 0, scoreWeight);
+                if (orangeBurst) OrangeBurstCleared?.Invoke(cleared.Count, Fleet.Count == 0, scoreWeight);
                 else
                 {
-                    MatchCleared?.Invoke(cleared.Count, Model.Count == 0, scoreWeight);
+                    MatchCleared?.Invoke(cleared.Count, Fleet.Count == 0, scoreWeight);
                     // Score this contact first, then advance the combo before the next contact.
                     foreach (var removedColor in removedColors) MatchColorScored?.Invoke(removedColor);
                 }
-                if (Model.Count == 0) FleetCleared?.Invoke();
+                if (Fleet.Count == 0) FleetCleared?.Invoke();
             }
             return cleared.Count;
         }
@@ -396,7 +377,7 @@ namespace CandyCruisers
             if (!SetColor(id, target.Color)) return false;
             foreach (var member in Model.ColorGroup(id)) joinedGroup.Add(member.Id);
             // Conversion is not a kill: no reward, clear bar, or spawn exclusion.
-            if (Model.ColorCount(EnemyColor.Yellow) == 0) LastYellowTransformed?.Invoke();
+            if (Fleet.ColorCount(EnemyColor.Yellow) == 0) LastYellowTransformed?.Invoke();
             return true;
         }
 

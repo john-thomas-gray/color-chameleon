@@ -5,6 +5,7 @@ namespace CandyCruisers
 {
     public sealed class FullSetCelebration
     {
+        public enum BarOrder { Wave, Random, Varied }
         public const float StepDuration = 60f / GameplayMusicPlayer.DefaultBeatsPerMinute;
         public const int MaxRewardBars = 6;
         public const float Duration = StepDuration * MaxRewardBars;
@@ -32,7 +33,10 @@ namespace CandyCruisers
         private readonly List<EnemyColor> colors = new List<EnemyColor>();
         private float age;
         private float holdSeconds;
+        private int startedBars;
         private bool simultaneousPowerDown;
+        private bool randomOrder;
+        public bool FinalBarOverlaps => Active && !simultaneousPowerDown && !randomOrder && colors.Count > 1;
         private readonly List<float> stepEnds = new List<float>();
         public float PlaybackDuration => Active ? stepEnds[stepEnds.Count - 1] : 0;
         public static float DurationForBars(float barBeats, float beatDuration) =>
@@ -41,9 +45,11 @@ namespace CandyCruisers
             Mathf.Max(.0001f, Mathf.Max(.0001f, duration) / Mathf.Max(1, bars));
         private readonly System.Random random = new System.Random();
         public event System.Action<EnemyColor> ColorRemoved;
+        public event System.Action<EnemyColor> BarStarted;
         public event System.Action<EnemyColor, float> BarSpiked;
         public EnemyColor? LastColor => Active ? colors[colors.Count - 1] : (EnemyColor?)null;
         public bool Active => colors.Count > 0;
+        public bool Waiting => Active && age < holdSeconds;
         public bool Finished => Active && age >= PlaybackDuration;
         private int Step
         {
@@ -80,11 +86,14 @@ namespace CandyCruisers
             return Mathf.Clamp01((age - peak) / Mathf.Max(.0001f, stepEnds[index] - peak));
         }
         public void Begin(List<EnemyColor> earned, EnemyColor[] plan = null, float duration = -1,
-            float[] beatDurations = null, float holdDuration = 0, bool simultaneousPowerDown = false)
+            float[] beatDurations = null, float holdDuration = 0, bool simultaneousPowerDown = false,
+            BarOrder order = BarOrder.Wave)
         {
-            colors.Clear(); colors.AddRange(earned); age = 0;
+            colors.Clear(); colors.AddRange(earned); age = 0; startedBars = 0;
             holdSeconds = Mathf.Max(0, holdDuration);
             this.simultaneousPowerDown = simultaneousPowerDown;
+            randomOrder = !simultaneousPowerDown && colors.Count > 1 &&
+                (order == BarOrder.Random || order == BarOrder.Varied && random.Next(2) == 0);
             float totalDuration = duration >= 0 ? duration : DurationForBars(colors.Count, StepDuration);
             float fallback = BeatDurationForTotal(totalDuration - holdSeconds, colors.Count);
             stepEnds.Clear();
@@ -100,10 +109,10 @@ namespace CandyCruisers
                 end += Mathf.Max(.0001f, step);
                 stepEnds.Add(end);
             }
-            if (!simultaneousPowerDown)
+            colors.Sort();
+            if (!simultaneousPowerDown && !randomOrder)
             {
                 // Match the left-to-right slot order; the session reserves the final color in the next fleet.
-                colors.Sort();
                 return;
             }
             for (int i = colors.Count - 1; i > 0; i--)
@@ -111,13 +120,23 @@ namespace CandyCruisers
                 int j = random.Next(i + 1);
                 var swap = colors[i]; colors[i] = colors[j]; colors[j] = swap;
             }
+            if (randomOrder)
+            {
+                // A random variation should visibly differ from the regular left-to-right wave.
+                bool sorted = true;
+                for (int i = 1; i < colors.Count; i++)
+                    if (colors[i - 1].CompareTo(colors[i]) > 0) { sorted = false; break; }
+                if (sorted)
+                { var swap = colors[0]; colors[0] = colors[1]; colors[1] = swap; }
+                return;
+            }
             // Prefer a final color already in the reserved fleet without consuming gameplay random numbers.
             if (plan != null)
                 for (int i = colors.Count - 1; i >= 0; i--)
                     if (System.Array.IndexOf(plan, colors[i]) >= 0)
                     { var swap = colors[colors.Count - 1]; colors[colors.Count - 1] = colors[i]; colors[i] = swap; break; }
         }
-        public void Reset() { colors.Clear(); stepEnds.Clear(); age = 0; holdSeconds = 0; simultaneousPowerDown = false; }
+        public void Reset() { colors.Clear(); stepEnds.Clear(); age = 0; holdSeconds = 0; startedBars = 0; simultaneousPowerDown = randomOrder = false; }
         public void Tick(float seconds)
         {
             float previous = age;
@@ -127,6 +146,11 @@ namespace CandyCruisers
             {
                 float removalTime = stepEnds[index];
                 float start = index == 0 ? holdSeconds : stepEnds[index - 1];
+                if (!simultaneousPowerDown && index >= startedBars && age >= start)
+                {
+                    startedBars = index + 1;
+                    BarStarted?.Invoke(colors[index]);
+                }
                 float spikeTime = start + (removalTime - start) * SpikePhase;
                 if (!simultaneousPowerDown && previous < spikeTime && age >= spikeTime)
                     BarSpiked?.Invoke(colors[index], removalTime - start);
@@ -155,60 +179,16 @@ namespace CandyCruisers
             float end = stepEnds[index];
             // Anticipate the next rise without moving any beat-counted removal or reward.
             float phase = (age - start) / Mathf.Max(.0001f, end - start);
-            float height = resting.height * WaveScale(phase, index > 0);
+            float height = resting.height * WaveScale(phase, !randomOrder && index > 0);
             return new Rect(resting.x, resting.yMax - height, resting.width, height);
         }
-    }
-
-    public sealed class ColorClearBarLayout
-    {
-        private readonly List<EnemyColor> previous = new List<EnemyColor>();
-        private readonly List<EnemyColor> next = new List<EnemyColor>();
-        private float age;
-        private float duration;
-        public bool Active => previous.Count > 0;
-        public IReadOnlyList<EnemyColor> Colors => age > 0 ? next : previous;
-
-        public void Begin(List<EnemyColor> current, List<EnemyColor> unlocked, float seconds)
-        {
-            Reset();
-            if (current.Count == 0 || unlocked.TrueForAll(current.Contains)) return;
-            previous.AddRange(current);
-            next.AddRange(unlocked);
-            duration = Mathf.Max(.0001f, seconds);
-        }
-
-        public void Tick(float seconds, bool celebrationFinished)
-        {
-            if (!Active || !celebrationFinished) return;
-            age += Mathf.Max(0, seconds);
-            if (age >= duration) Reset();
-        }
-
-        public Rect Present(EnemyColor color, Rect row)
-        {
-            if (!Active) return new Rect(row.x, row.y, 0, 0);
-            float growth = Mathf.SmoothStep(0, 1, Mathf.Clamp01(age / duration));
-            float total = previous.Count + (next.Count - previous.Count) * growth;
-            float offset = 0;
-            foreach (var slot in next)
-            {
-                float weight = previous.Contains(slot) ? 1 : growth;
-                float width = row.width * weight / total;
-                if (slot == color)
-                    return new Rect(row.x + offset, row.y, Mathf.Max(0, width - 2 * weight), row.height);
-                offset += width;
-            }
-            return new Rect(row.x, row.y, 0, 0);
-        }
-
-        public void Reset() { previous.Clear(); next.Clear(); age = 0; duration = 0; }
     }
 
     public sealed class ColorClearBarAnimation
     {
         public const float Duration = .65f;
         private readonly Dictionary<EnemyColor, float> ages = new Dictionary<EnemyColor, float>();
+        public void Reset() => ages.Clear();
         public void Begin(EnemyColor color) => ages[color] = 0;
         public void Tick(float seconds)
         {

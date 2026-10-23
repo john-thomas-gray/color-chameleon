@@ -155,9 +155,12 @@ such as `300 + 100 x4 = +700`, without multiplying earlier hits again.
 Clearing the fleet adds `10000 * level`, without a digit or combo multiplier.
 Both use the level before that clear.
 
-The next level requires `9 * level * (level + 1)` cumulative defeats. Thus level
-2 begins at 18, level 3 at 54, level 4 at 108, level 5 at 180, and level 6 at 270.
-A large clear can cross multiple thresholds without losing progression.
+Each level in `Assets/Resources/LevelMap.json` sets `enemiesToDefeat`, the additional defeats needed
+to earn the next level. Targets accumulate across the run, and advancement
+waits for the current fleet to clear. The starter targets are 20, 40, 60, and
+so on; a large clear can cross multiple targets without losing progression.
+Without a catalog, the legacy cumulative threshold is
+`10 * level * (level + 1)`. See [Level Progression](LEVEL_PROGRESSION.md).
 
 | Level | Eligible Types | Refill Size |
 | --- | --- | --- |
@@ -169,8 +172,8 @@ A large clear can cross multiple thresholds without losing progression.
 | 7-8 | Red, Blue, Green, Purple, Yellow | 36 |
 | 9+ | All six | 36 |
 
-The scene starts empty. After the one-second opening pause, ten Red/Blue
-enemies phase in (or override-selected types when testing). Unlocks affect subsequent
+The scene starts empty. Ten Red/Blue enemies grow in on beat four and reach
+full size on the following beat one (or override-selected types when testing). Unlocks affect subsequent
 rows, refill batches, and Purple summons. Subsequent rows are five enemies wide
 through level 6 and six enemies wide from level 7 onward. Existing enemies do
 not change type when a level changes. Restart reloads a fresh score and
@@ -445,10 +448,14 @@ The opening uses the same planned-batch mechanism as a refill, with two rows
 instead of the later level-scaled refill size. Player movement is available
 during the empty opening, and its selected color belongs to the planned fleet.
 Restart repeats this empty opening rather than loading pre-placed enemies.
+With music playing, opening fleets build on beat four and land at full size on
+the next beat one, using the same sharp arrival as refills.
 
-All newly spawned enemies use the original Purple-summon rift geometry and
-0.8-second fade. Batch, row and ordinary Purple summons use the arriving enemy's
-color. Special Purple summons always use a purple rift, regardless of the new
+Opening fleets use a one-beat grow-in; full-set refills use the latter half of
+beat four. Ordinary new rows grow in over
+0.8 seconds; Purple summons use the original rift geometry and 0.8-second fade.
+Ordinary Purple summons use the arriving enemy's color. Special Purple summons
+always use a purple rift, regardless of the new
 enemy's color; its body, logical color and abilities remain unchanged.
 The sprite begins fully transparent immediately,
 preventing a full-opacity flash before animation. Blue's shield stays hidden
@@ -459,14 +466,22 @@ opening fleets, ordinary rows, refills, and summons without duplicate triggers.
 
 The last hit no longer cancels the tongue. It retracts visibly while the fleet
 is paused. Partial clears spike every earned bar at once and power them down
-together across the remaining time to the next eligible spawn downbeat, fading
+together across the remaining time until the fleet begins appearing, fading
 their glow back to the default unpowered bar color without further beat pulsing. Complete
-sets divide the available current-song beats across the earned bars, then leave
-the field empty and hold the player's final color for the reserved beat before
-the next fleet starts; earned-life clears retain their additional reserved beat
-while the incoming slime bounces up from the final spike. With no active music,
-partial bars power down over one beat at the current
-tempo. Pause also freezes the gap. Player movement remains active, but firing
+sets wait until a whole beat leaves room for one bar pulse per beat leading
+into the downbeat. With two filled colors, the bars animate on counts three and
+four. While waiting, the bars continue their normal music-reactive motion. The
+last bar animates in the first half of four; the fleet grows during the latter
+half and finishes on the following beat one. Growth accelerates into a sharp full-size landing on one, without an early
+overshoot or a settling tail. There is no gap between the countdown and the grow-in, including when a life
+is awarded. The arrival follows the soundtrack clock across tempo changes and
+long frames. The sequence chooses randomly
+between a left-to-right overlapping wave and individually rising bars in shuffled
+order; their display slots stay fixed. The field stays empty through the bar
+countdown, and the incoming slime always bounces off the
+actual final bar while it is rising, whichever order was chosen. With no active
+music, full sets use one beat per bar at the current tempo, while partial bars
+power down together over one beat. Pause freezes the countdown and arrival. Player movement remains active, but firing
 into an empty field is blocked.
 
 Newly unlocked sound-bar slots stay hidden until the activated bars finish their

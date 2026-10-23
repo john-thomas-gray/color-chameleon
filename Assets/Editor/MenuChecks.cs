@@ -150,7 +150,11 @@ namespace CandyCruisers.Editor
                         session.Progress.Score == 0, "Play starts at the selected level without score");
                     Check(session.State == GameSession.RunState.Refilling && grid.Model.Count == 0,
                         "Selected level start keeps the empty musical opening beat");
-                    session.Tick(grid.GetComponent<GameplayMusicPlayer>().BeatDuration + .001f);
+                    var music = grid.GetComponent<GameplayMusicPlayer>();
+                    // This synchronous menu fixture advances session time, not real audio time.
+                    // Real-playback arrival checks cover the musical opening separately.
+                    music.StopPlayback();
+                    session.Tick(music.BeatDuration + .001f);
                     Check(session.State == GameSession.RunState.Playing &&
                         grid.Model.Count == session.Progress.BatchEnemies, "Selected level start spawns that level's batch size");
                     Check(grid.Model.Count == 6 * RunProgress.WideRowWidth,

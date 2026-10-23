@@ -11,6 +11,7 @@ namespace CandyCruisers.Editor
         [MenuItem("Candy Cruisers/Run Checks")]
         public static void Run()
         {
+            using var metronomes = new MetronomeCheckSettings();
             bool previousOverride = SpawnOverride.Enabled;
             SpawnOverride.Enabled = false;
             try { RunChecks(); }
@@ -28,6 +29,9 @@ namespace CandyCruisers.Editor
             Directory.CreateDirectory("TestResults");
             Capture(540, 960, "empty-opening");
             var spawner = grid.GetComponent<EnemyRowSpawner>();
+            // The baseline mechanics fixture has fixed expectations. Level-definition and
+            // fleet-state checks below exercise custom catalogs without editing user assets.
+            grid.GetComponent<GameSession>().LevelCatalog = null;
             Require(spawner.SpawnBatch(spawner.PlanOpening()) && grid.transform.childCount == 2 * RunProgress.StandardRowWidth, "Opening spawns two rows of five");
             foreach (var ability in grid.GetComponentsInChildren<EnemyAbilities>()) ability.Tick(1);
             foreach (Transform enemy in grid.transform)
@@ -44,11 +48,14 @@ namespace CandyCruisers.Editor
             ProgressionChecks.Run();
             SpawnOverrideChecks.Run();
             DeveloperOptionsChecks.Run();
+            MetronomeOptionsChecks.Run();
             CombatChecks.Run();
             ColorCycleChecks.Run();
             WaveTransitionChecks.Run();
             SpawnPresentationChecks.Run();
             RowCompositionChecks.Run();
+            FleetStateChecks.Run();
+            LevelProgressionChecks.Run();
             CombatTuningChecks.Run();
             FleetTickChecks.Run();
             PlayfieldFrameChecks.Run();

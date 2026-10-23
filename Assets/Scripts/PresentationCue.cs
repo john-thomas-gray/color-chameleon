@@ -49,7 +49,8 @@ namespace CandyCruisers
                 }
                 else if (kind == Kind.PlayerFatalDust)
                 {
-                    cue.playerFatalDust = PlayerFatalDustBurst.Create(source, cue.transform, cue.Depth);
+                    cue.playerFatalDust = PlayerFatalDustBurst.Create(source, cue.transform,
+                        source.GetComponentInParent<PlayerMovement>()?.Fleet?.Colors);
                     cue.duration = PlayerFatalDustBurst.Duration;
                 }
                 else if (kind == Kind.Defeat)

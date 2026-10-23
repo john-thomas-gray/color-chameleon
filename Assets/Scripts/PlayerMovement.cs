@@ -34,6 +34,7 @@ namespace CandyCruisers
         public PlayerLifeIcons LifeIcons { get; } = new PlayerLifeIcons();
         public EnemyColor? ReadyColor { get; private set; }
         public int MagicCharges { get; private set; }
+        public FleetState Fleet => grid != null ? grid.Fleet : null;
         public bool HasColorClearBar(EnemyColor color) => grid != null && grid.HasColorClearBar(color);
         public Color? CelebrationColor { get; private set; }
         public GameplayMusicPlayer Music => grid != null ? grid.GetComponent<GameplayMusicPlayer>() : null;
@@ -46,22 +47,23 @@ namespace CandyCruisers
         private bool returnColorPrepared;
         private bool reservedCelebrationColor;
         public bool ShotActive => tongue != null && tongue.Active;
-        public bool HasFleet => grid != null && grid.Model.Count > 0;
+        public bool HasFleet => grid != null && grid.Fleet.Count > 0;
         public void FinishWaveReturn() { if (tongue != null && tongue.Active) tongue.Cancel(); }
         public bool Stunned { get; private set; }
         public void PrepareNextWave(EnemyColor[] plan, EnemyColor? reservedColor = null)
         {
             if (plan == null || plan.Length == 0) return;
-            var weights = new Dictionary<EnemyColor, int>();
             int rowWidth = grid != null ? grid.GetComponent<EnemyRowSpawner>()?.RowWidthForPlan(plan) ?? plan.Length : plan.Length;
             if (rowWidth == 0) rowWidth = plan.Length;
-            for (int i = 0; i < plan.Length; i++)
-            {
-                weights.TryGetValue(plan[i], out int previous);
-                if (plan[i] == EnemyColor.Orange && previous > 0) continue;
-                weights[plan[i]] = previous + i / rowWidth + 1;
-            }
+            PrepareNextWave(new FleetPlan(plan, rowWidth), reservedColor);
+        }
+
+        public void PrepareNextWave(FleetPlan plan, EnemyColor? reservedColor = null)
+        {
+            if (plan == null) return;
+            var weights = plan.PlayerColorWeights();
             if (weights.Count > 1 && ReadyColor.HasValue) weights.Remove(ReadyColor.Value);
+            if (reservedColor.HasValue && !plan.Contains(reservedColor.Value)) reservedColor = null;
             nextWaveColor = reservedColor ?? ChooseColor(weights);
             reservedCelebrationColor = reservedColor.HasValue;
             RefreshColor();
@@ -96,7 +98,7 @@ namespace CandyCruisers
                 tongue != null && tongue.Active && tongue.IsMagic;
             var music = Music;
             float flashPhase = music != null && music.InGameplayRun ? Mathf.Max(0, music.BeatPosition) * 4 : time * 10;
-            body.color = magic ? EnemyPalette.Get((EnemyColor)(Mathf.FloorToInt(flashPhase) % 6)) :
+            body.color = magic ? EnemyPalette.Get(EnemyPalette.CycleColor(Mathf.FloorToInt(flashPhase))) :
                 tongue != null && tongue.Active ? EnemyPalette.Get(tongue.ShotColor) :
                 ReadyColor.HasValue ? EnemyPalette.Get(ReadyColor.Value) : Color.gray;
         }
@@ -485,7 +487,7 @@ namespace CandyCruisers
             if (nextWaveColor.HasValue)
             {
                 var chosen = nextWaveColor;
-                if (grid.Model.Count > 0)
+                if (grid.Fleet.Count > 0)
                 {
                     if (!reservedCelebrationColor && !weights.ContainsKey(chosen.Value))
                         chosen = ChooseColor(weights);
@@ -494,7 +496,7 @@ namespace CandyCruisers
                 }
                 return chosen;
             }
-            if (grid.Model.Count == 0) return current;
+            if (grid.Fleet.Count == 0) return current;
             if (weights.Count == 0) return null;
             // Reserve the preview using the same reachable colors as the next shot.
             return reroll || !current.HasValue || !weights.ContainsKey(current.Value) ? ChooseColor(weights) : current;
@@ -592,7 +594,7 @@ namespace CandyCruisers
 
         private bool Fire(bool preserveReadyColor)
         {
-            if (ControlsLocked || Stunned || !Alive || grid.Model.Count == 0) return false;
+            if (ControlsLocked || Stunned || !Alive || grid.Fleet.Count == 0) return false;
             if (preserveReadyColor)
             {
                 if (!ReadyColor.HasValue) RefreshColor();

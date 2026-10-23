@@ -87,7 +87,8 @@ namespace CandyCruisers
 
         public void BeginImpact(Vector3 position, int level)
         {
-            if (impact == null) impact = FatalImpactBackdrop.Create(transform, position, cover.sharedMaterial, level);
+            if (impact == null) impact = FatalImpactBackdrop.Create(transform, position, cover.sharedMaterial,
+                GetComponentInParent<EnemyGrid>()?.Fleet.Colors);
         }
 
         public void Present(float opacity, float impactAge = float.PositiveInfinity)

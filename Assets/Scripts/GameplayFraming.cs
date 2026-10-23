@@ -129,6 +129,12 @@ namespace CandyCruisers
                 projection.m11 *= WaveCrunchScale;
                 view.projectionMatrix = projection;
             }
+            if (session == null) BindSession(FindFirstObjectByType<GameSession>());
+            if (session != null && session.CurrentLevelDefinition != null)
+            {
+                ApplyLevelBackground();
+                return;
+            }
             if (solidBlackBackground)
             {
                 view.clearFlags = CameraClearFlags.SolidColor;
@@ -164,6 +170,13 @@ namespace CandyCruisers
         {
             seconds = Mathf.Max(0, seconds);
             int level = CurrentLevel();
+            if (session != null && session.CurrentLevelDefinition != null)
+            {
+                displayedLevel = level;
+                wavePulseRemaining = levelCrossFadeRemaining = 0;
+                Refresh();
+                return;
+            }
             if (displayedLevel < 0) InitializeDisplayedLevel(level);
             else if (level != displayedLevel) StartLevelCrossFade(level);
             if (solidBlackBackground)
@@ -199,6 +212,30 @@ namespace CandyCruisers
             Refresh();
         }
 
+        private void ApplyLevelBackground()
+        {
+            view.clearFlags = CameraClearFlags.SolidColor;
+            view.backgroundColor = Color.black;
+            if (crossFadeBackground != null) crossFadeBackground.enabled = false;
+            var image = session.State == GameSession.RunState.MainMenu ? null : session.CurrentLevelDefinition.backgroundImage;
+            if (starBackground == null) return;
+            starBackground.enabled = image != null;
+            if (image == null) return;
+            starBackground.sprite = image;
+            starBackground.color = Color.white;
+            starBackground.sortingOrder = -100;
+            starBackground.transform.rotation = Quaternion.identity;
+            var position = view.transform.position;
+            position.z = starBackground.transform.position.z;
+            starBackground.transform.position = position;
+            var size = image.bounds.size;
+            float scale = Mathf.Max(2 * view.orthographicSize * view.aspect / Mathf.Max(.001f, size.x),
+                2 * view.orthographicSize / Mathf.Max(.001f, size.y)) / WaveCrunchScale;
+            // Fit the sprite's bounds even when its artist chose an off-center pivot.
+            starBackground.transform.localScale = Vector3.one * scale;
+            starBackground.transform.position -= (Vector3)image.bounds.center * scale;
+        }
+
         public void TriggerWaveSpawnEffect()
         {
             if (solidBlackBackground) return;
@@ -207,7 +244,7 @@ namespace CandyCruisers
 
         public static Color TintForLevel(int level)
         {
-            var color = EnemyPalette.Get((EnemyColor)(Mathf.Abs(level - 1) % 6));
+            var color = EnemyPalette.Get(EnemyPalette.CycleColor(Mathf.Abs(level - 1)));
             return Color.Lerp(Color.white, color, .28f);
         }
 

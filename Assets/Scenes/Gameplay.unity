@@ -1122,6 +1122,8 @@ GameObject:
   - component: {fileID: 1463775470}
   - component: {fileID: 1463775471}
   - component: {fileID: 1463775472}
+  - component: {fileID: 1463775474}
+  - component: {fileID: 1463775473}
   m_Layer: 0
   m_Name: Enemy Grid
   m_TagString: Untagged
@@ -1207,6 +1209,210 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::CandyCruisers.GameSession
   refillDelay: 2
   player: {fileID: 1647030757}
+  levelMap: {fileID: 4900000, guid: 0fe0ea70797047ffa1602bfdba6af3ed, type: 3}
+--- !u!114 &1463775473
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1463775467}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: df35b8a1c7b84a2ebed18353469a9a58, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::CandyCruisers.GameplayMusicPlayer
+  soundtrack:
+  - resourceName: DiscoDescent
+    beatsPerMinute: 115.03
+    beatOffsetSeconds: 0.08
+    relativeMajorTonic: 0
+    downbeatOffsetBeats: 1
+  - resourceName: GameplayMusic
+    beatsPerMinute: 142
+    beatOffsetSeconds: 0.09
+    relativeMajorTonic: 8
+    downbeatOffsetBeats: 1
+  - resourceName: AnotherJoe
+    beatsPerMinute: 140
+    beatOffsetSeconds: 0.1
+    relativeMajorTonic: 2
+    downbeatOffsetBeats: 1
+  - resourceName: PotentialForAnything
+    beatsPerMinute: 125
+    beatOffsetSeconds: 0
+    relativeMajorTonic: 5
+    downbeatOffsetBeats: 1
+  - resourceName: Skanska
+    beatsPerMinute: 128
+    beatOffsetSeconds: 0
+    relativeMajorTonic: 0
+    downbeatOffsetBeats: 1
+  - resourceName: TheThirdKind
+    beatsPerMinute: 139.67
+    beatOffsetSeconds: 0
+    relativeMajorTonic: 0
+    downbeatOffsetBeats: 1
+  - resourceName: DownToEarthPart1
+    beatsPerMinute: 143.55
+    beatOffsetSeconds: 0.10449
+    relativeMajorTonic: 0
+    downbeatOffsetBeats: 1
+  - resourceName: UntilICollapse
+    beatsPerMinute: 139.67
+    beatOffsetSeconds: 0.09288
+    relativeMajorTonic: 0
+    downbeatOffsetBeats: 1
+  - resourceName: WarOnActivism
+    beatsPerMinute: 143.55
+    beatOffsetSeconds: 0.19737
+    relativeMajorTonic: 0
+    downbeatOffsetBeats: 1
+  - resourceName: IntergalacticEmotionalBreakdown
+    beatsPerMinute: 143.55
+    beatOffsetSeconds: 0.26703
+    relativeMajorTonic: 0
+    downbeatOffsetBeats: 1
+  - resourceName: ShootingRobotsInSpace
+    beatsPerMinute: 136
+    beatOffsetSeconds: 0.62694
+    relativeMajorTonic: 0
+    downbeatOffsetBeats: 1
+  - resourceName: VertexStage1
+    beatsPerMinute: 143.55
+    beatOffsetSeconds: 0.22059
+    relativeMajorTonic: 0
+    downbeatOffsetBeats: 1
+  - resourceName: Contact
+    beatsPerMinute: 123.05
+    beatOffsetSeconds: 0.05805
+    relativeMajorTonic: 2
+    downbeatOffsetBeats: 0
+  - resourceName: ForWhomTheKnellTolls
+    beatsPerMinute: 140
+    beatOffsetSeconds: 0.09288
+    relativeMajorTonic: 11
+    downbeatOffsetBeats: 1
+  - resourceName: AColdSweat
+    beatsPerMinute: 155
+    beatOffsetSeconds: 0.09288
+    relativeMajorTonic: 0
+    downbeatOffsetBeats: 1
+  - resourceName: HeartOfTheCrypt
+    beatsPerMinute: 145
+    beatOffsetSeconds: 0.09288
+    relativeMajorTonic: 3
+    downbeatOffsetBeats: 1
+  - resourceName: StyxAndStones
+    beatsPerMinute: 130
+    beatOffsetSeconds: 0.09288
+    relativeMajorTonic: 4
+    downbeatOffsetBeats: 1
+  customTrackRelativeMajorTonic: 0
+  beatsPerMinute: 115.03
+  beatOffsetSeconds: 0.08
+  session: {fileID: 1463775472}
+  track: {fileID: 0}
+  menuTrack: {fileID: 0}
+  volume: 0.1
+  muted: 0
+--- !u!82 &1463775474
+AudioSource:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1463775467}
+  m_Enabled: 1
+  serializedVersion: 4
+  OutputAudioMixerGroup: {fileID: 0}
+  m_audioClip: {fileID: 0}
+  m_Resource: {fileID: 0}
+  m_PlayOnAwake: 0
+  m_Volume: 0.1
+  m_Pitch: 1
+  Loop: 1
+  Mute: 0
+  Spatialize: 0
+  SpatializePostEffects: 0
+  Priority: 128
+  DopplerLevel: 0
+  MinDistance: 1
+  MaxDistance: 500
+  Pan2D: 0
+  rolloffMode: 0
+  BypassEffects: 0
+  BypassListenerEffects: 0
+  BypassReverbZones: 0
+  rolloffCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    - serializedVersion: 3
+      time: 1
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  panLevelCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  spreadCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  reverbZoneMixCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
 --- !u!1 &1512396677
 GameObject:
   m_ObjectHideFlags: 0

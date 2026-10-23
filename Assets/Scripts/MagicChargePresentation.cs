@@ -41,7 +41,7 @@ namespace CandyCruisers
             float phase = progress * Mathf.PI * 8;
             float radius = Mathf.Lerp(.34f, .075f, progress);
             var center = Vector3.up * .22f;
-            var color = Color.Lerp(EnemyPalette.Get((EnemyColor)(Mathf.FloorToInt(progress * 15) % 6)), Color.white, .35f);
+            var color = Color.Lerp(EnemyPalette.Get(EnemyPalette.CycleColor(Mathf.FloorToInt(progress * 15))), Color.white, .35f);
             ring.startColor = ring.endColor = color;
             ring.startWidth = ring.endWidth = .025f + .025f * progress + .008f * Mathf.Sin(phase * 2);
             for (int i = 0; i < ring.positionCount; i++)

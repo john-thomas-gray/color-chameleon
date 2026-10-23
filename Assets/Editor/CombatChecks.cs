@@ -15,12 +15,10 @@ namespace CandyCruisers.Editor
                 var first = CombatBalance.CooldownRange(color, 1, special);
                 var second = CombatBalance.CooldownRange(color, 2, special);
                 var final = CombatBalance.CooldownRange(color, 10000, special);
-                var unchanged = color == EnemyColor.Red || color == EnemyColor.Blue ? new Vector2(2.25f, 7.5f) :
-                    color == EnemyColor.Green || color == EnemyColor.Purple ? new Vector2(6, 9) : new Vector2(1.5f, 4.5f);
-                Check(first == unchanged, "Both basic and special cooldowns retain their existing starting values: " + color);
-                foreach (int level in new[] { 1, 2, 6, 19, 10000 })
-                    Check(CombatBalance.CooldownRange(color, level, special) == CombatBalance.CooldownRange(color, level),
-                        "Tier-specific cooldown tuning currently preserves identical values at every level");
+                // Basic and upgraded enemies have independently tuned starting ranges.
+                Vector2[] basic = { new(2.25f, 7.5f), new(2.25f, 7.5f), new(6, 9), new(6, 9), new(1.5f, 9), new(.75f, 3.75f) };
+                Vector2[] upgraded = { new(2.25f, 5.25f), new(.75f, 3.75f), new(1.5f, 4.5f), new(6, 18), new(1.5f, 4.5f), new(1.5f, 4.5f) };
+                Check(first == (special ? upgraded : basic)[(int)color], "Cooldowns preserve the current independent starting ranges: " + color);
                 Check(first.x > 0 && first.y >= first.x + 3, "Cooldowns stay positive with room for variance");
                 Check(second.x == first.x && second.y <= first.y && Mathf.Abs(second.y - Mathf.Max(first.x + 3, first.y - .25f)) < .001f,
                     "Only cooldown maximum decreases gently, stopping at the variance floor");
@@ -59,7 +57,7 @@ namespace CandyCruisers.Editor
             Check(shield.rect.size == new Vector2(128, 128) && shield.pivot == new Vector2(64, 64),
                 "Shield import retains the full circular frame and centered pivot");
             foreach (float step in new[] { .016f, .1f, 2f }) Magic(step);
-            Debug.Log("Combat checks passed: shield ring, separate basic/special cooldown ranges with unchanged values and scaling, level speed, magic awards, piercing, shields, charge cap and resets.");
+            Debug.Log("Combat checks passed: shield ring, independent basic/special cooldown ranges and scaling, level speed, magic awards, piercing, shields, charge cap and resets.");
         }
 
         private static void Magic(float step)

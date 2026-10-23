@@ -21,15 +21,15 @@ namespace CandyCruisers
         private Material material;
         private SpriteRenderer flash;
 
-        public static PlayerFatalDustBurst Create(SpriteRenderer source, Transform parent, int level)
+        public static PlayerFatalDustBurst Create(SpriteRenderer source, Transform parent, IReadOnlyList<EnemyColor> colors)
         {
             var root = new GameObject("Player fatal dust burst", typeof(MeshFilter), typeof(MeshRenderer));
             root.transform.SetParent(parent, false);
             var burst = root.AddComponent<PlayerFatalDustBurst>();
             var palette = new List<Color>();
-            foreach (EnemyColor color in System.Enum.GetValues(typeof(EnemyColor)))
-                if (RunProgress.IsUnlocked(color, level)) palette.Add(EnemyPalette.Get(color));
-            if (palette.Count == 0) palette.Add(EnemyPalette.Get(EnemyColor.Red));
+            if (colors != null)
+                foreach (var color in colors) palette.Add(EnemyPalette.Get(color));
+            if (palette.Count == 0) palette.Add(source.color);
             var bounds = source.bounds;
             var visuals = source.GetComponentInParent<CharacterVisuals>();
             if (visuals != null)

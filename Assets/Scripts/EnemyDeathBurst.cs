@@ -112,7 +112,7 @@ namespace CandyCruisers
                     float shimmer = .5f + .5f * Mathf.Sin(burstAge * (8 + i % 5) + i * 2.399963f);
                     float size = dustSizes[i] * Mathf.Lerp(.9f, 1.1f, shimmer);
                     shard.transform.localScale = new Vector3(size, size, 1);
-                    var color = EnemyPalette.Get((EnemyColor)(i % 6));
+                    var color = EnemyPalette.Get(EnemyPalette.CycleColor(i));
                     // Shimmer without fading or shrinking away before reaching the player.
                     float alpha = Mathf.Lerp(.7f, 1, shimmer);
                     shard.color = new Color(color.r, color.g, color.b, alpha);

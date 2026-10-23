@@ -14,6 +14,7 @@ namespace CandyCruisers.Editor
             CheckComboBreakPresentation();
             CheckComboDeathFade();
             CheckComboColor();
+            CheckGameplayTextLayout();
             CheckScoreCalculation();
             CheckPlayerShotCombo();
             CheckLeaderboard();
@@ -211,8 +212,8 @@ namespace CandyCruisers.Editor
                         !ComboMilestoneActive(session) && session.ComboDeathMultiplier == 5 &&
                         session.ComboDeathOpacity == 1 && session.Progress.ComboMultiplier == 1,
                         "Death keeps only the life-loss animation and a fading copy of the old corner combo");
-                    Check(session.ComboDeathColor == EnemyPalette.Get(EnemyColor.Blue),
-                        "Death fade keeps the last destroyed enemy color");
+                    Check(session.ComboDeathColor == player.AccentColor,
+                        "Death fade follows the current player accent");
                     session.Tick(GameSession.ComboDeathFadeSeconds / 2);
                     Check(Mathf.Abs(session.ComboDeathOpacity - .5f) < .001f && !session.ComboBreak.Active,
                         "Corner combo fades smoothly without launching a slash");
@@ -224,9 +225,9 @@ namespace CandyCruisers.Editor
                     Check(session.ComboDeathOpacity == opacity, "Pause freezes the corner fade");
                     session.Resume();
                     grid.ClearMatchingChain(sentinel.Id, EnemyColor.Red);
-                    Check(session.ComboColor == EnemyPalette.Get(EnemyColor.Red) &&
-                        session.ComboDeathColor == EnemyPalette.Get(EnemyColor.Blue),
-                        "Later enemy deaths cannot recolor the fading old combo");
+                    Check(session.ComboColor == player.AccentColor &&
+                        session.ComboDeathColor == player.AccentColor,
+                        "Live and fading text share the player accent after further clears");
                     session.Tick(GameSession.ComboDeathFadeSeconds);
                     Check(session.ComboDeathOpacity == 0 && !session.ComboBreak.Active,
                         "Fade finishes cleanly without bringing back the combo break");
@@ -276,51 +277,88 @@ namespace CandyCruisers.Editor
             {
                 var session = grid.gameObject.AddComponent<GameSession>();
                 session.Configure(player);
-                if (!Application.isPlaying) InvokeLifecycle(session, "OnEnable");
-                try
+                ProgressionChecks.Add(grid, EnemyColor.Red, 4, 5);
+                ProgressionChecks.Add(grid, EnemyColor.Blue, 2, 0);
+                foreach (EnemyColor color in Enum.GetValues(typeof(EnemyColor)))
                 {
-                    Check(session.ComboColor == Color.white && session.ComboFont != null &&
-                        session.ComboFont == Resources.Load<Font>("Fonts/Bungee-Regular"),
-                        "Combo uses bundled Bungee and begins neutral before any enemy is destroyed");
-                    var sentinel = ProgressionChecks.Add(grid, EnemyColor.Red, 4, 5);
-                    foreach (EnemyColor color in Enum.GetValues(typeof(EnemyColor)))
-                    {
-                        var target = ProgressionChecks.Add(grid, color, 2, 0);
-                        grid.ClearMatchingChain(target.Id, color);
-                        Check(session.ComboColor == EnemyPalette.Get(color), "Combo follows destroyed " + color + " enemies");
-                        player.SetCelebrationColor(Color.gray);
-                        Check(session.ComboColor == EnemyPalette.Get(color), "Player color changes do not recolor the combo");
-                    }
-                    var previous = session.ComboColor;
-                    grid.SetColor(sentinel.Id, EnemyColor.Blue);
-                    grid.ClearMatchingChain(sentinel.Id, EnemyColor.Red);
-                    Check(session.ComboColor == previous, "Conversion and mismatches are not enemy destruction");
-                    var red = ProgressionChecks.Add(grid, EnemyColor.Red, 2, 0);
-                    var yellow = ProgressionChecks.Add(grid, EnemyColor.Yellow, 2, 1);
-                    grid.Model.BeginImitation(yellow.Id, red.Id);
-                    grid.ClearMatchingChain(red.Id, EnemyColor.Red);
-                    Check(session.ComboColor == EnemyPalette.Get(EnemyColor.Yellow),
-                        "A linked mixed-color chain uses its final destroyed enemy, not the shot color");
-                    AdvanceCombo(session, 3);
-                    session.Progress.FinishShot(false);
-                    session.Tick(0);
-                    Check(session.ComboBreak.SourceColor == EnemyPalette.Get(EnemyColor.Yellow),
-                        "Combo break snapshots the last destroyed color");
-                    red = ProgressionChecks.Add(grid, EnemyColor.Red, 2, 0);
-                    grid.ClearMatchingChain(red.Id, EnemyColor.Red);
-                    Check(session.ComboColor == EnemyPalette.Get(EnemyColor.Red) &&
-                        session.ComboBreak.SourceColor == EnemyPalette.Get(EnemyColor.Yellow),
-                        "A new destruction updates the live combo without recoloring an existing break");
-                    InvokeLifecycle(session, "ResetComboPresentation");
-                    Check(session.ComboColor == Color.white && !session.ComboBreak.Active,
-                        "A new run clears the previous enemy color and break");
+                    player.SetCelebrationColor(EnemyPalette.Get(color));
+                    Check(session.ComboColor == player.AccentColor && session.GameplayTextColor == player.DisplayColor,
+                        "Combo, score and level follow the live player color " + color);
                 }
-                finally
+                player.SetCelebrationColor(null);
+                typeof(PlayerMovement).GetProperty("MagicCharges").SetValue(player, 1);
+                var flashed = new HashSet<Color>();
+                var music = grid.GetComponent<GameplayMusicPlayer>() ?? grid.gameObject.AddComponent<GameplayMusicPlayer>();
+                music.Configure(session);
+                music.PreviewTempo = 120;
+                for (int i = 0; i < 12; i++)
                 {
-                    player.SetCelebrationColor(null);
-                    if (!Application.isPlaying) InvokeLifecycle(session, "OnDisable");
+                    music.PreviewTime = (i + .5f) * .125f;
+                    player.RefreshPresentation(i * .1f);
+                    flashed.Add(session.GameplayTextColor);
+                    Check(session.ComboColor == player.DisplayColor, "Charged text follows every magic flash without a clear event");
                 }
+                Check(flashed.Count == EnemyPalette.Colors.Count, "Magic text flashes through the full player palette");
+                music.PreviewTime = null;
+                Check(player.Fire() && tongue.IsMagic && player.MagicCharges == 0,
+                    "Fixture spends the charge on a magic shot");
+                player.RefreshPresentation(.21f);
+                Check(session.ComboColor == player.DisplayColor, "Magic shot keeps the text multicolored after spending the charge");
+                tongue.Cancel();
+                player.SetCelebrationColor(EnemyPalette.Get(EnemyColor.Green));
+                Check(session.ComboColor == EnemyPalette.Get(EnemyColor.Green), "Text immediately restores the current player color");
+                player.SetCelebrationColor(null);
+                typeof(PlayerMovement).GetProperty("ReadyColor").SetValue(player, EnemyColor.Red);
+                player.RefreshPresentation(0);
+                Check(tongue.TryFire(EnemyColor.Red, 1), "Text fixture starts a returning shot");
+                tongue.Tick(1f / 14f, grid);
+                Check(player.ReturnColorPreview.HasValue && session.GameplayTextColor == player.AccentColor,
+                    "Text follows the reserved return color used by the border and progress bar");
+
+                foreach (var alignment in new[] { TextAnchor.MiddleLeft, TextAnchor.MiddleRight })
+                foreach (float width in new[] { 58f, 84f, 130f, 260f })
+                foreach (string text in new[] { "SCORE 1,234,567,890", "LEVEL 999", "x9999" })
+                {
+                    var style = session.GameplayTextStyle(16, alignment);
+                    Check(style.font == Resources.Load<Font>("Fonts/Bungee-Regular") && style.fontStyle == FontStyle.Normal,
+                        "All gameplay headings use the original Bungee font weight");
+                    var rect = new Rect(0, 0, width, 26);
+                    GameSession.FitGameplayText(style, text, rect);
+                    Check(style.CalcSize(new GUIContent(text)).x * GameSession.GameplayTextMaxPulseScale <= width + .01f,
+                        "Large values fit the heading at the peak of the beat pulse");
+                }
+                foreach (int frameRate in new[] { 30, 60, 120 })
+                {
+                    float beat = 0;
+                    for (int frame = 0; frame < frameRate; frame++) beat += 2f / frameRate;
+                    Check(Mathf.Abs(GameSession.GameplayTextPulseScale(beat) - GameSession.GameplayTextMaxPulseScale) < .0001f,
+                        "Music-position pulse stays aligned at " + frameRate + " frames per second");
+                }
+                Check(GameSession.GameplayTextPulseScale(.5f) == 1 &&
+                    GameSession.GameplayTextPulseScale(1) == GameSession.GameplayTextMaxPulseScale,
+                    "Text expands on the beat and returns to resting size between beats");
             });
+        }
+
+        private static void CheckGameplayTextLayout()
+        {
+            foreach (int height in new[] { 320, 540, 844, 1278 })
+            foreach (float width in new[] { 200f, 300f, 440f })
+            {
+                var lives = PlayerLifeIcons.RowRect(10, 20, height);
+                var score = GameSession.GameplayScoreRect(10, 20, width, height);
+                var level = GameSession.GameplayLevelRect(10, 20, width);
+                var combo = GameSession.ComboMultiplierRestRect(10, width, 20, height);
+                Check(Mathf.Abs(score.xMin - PlayerLifeIcons.IconRect(lives, 0).xMin) < .001f && score.yMax < lives.yMin,
+                    "Score and first extra life share a left edge in separate rows");
+                Check(Mathf.Abs(combo.xMax - level.xMax) < .001f && Mathf.Abs(level.xMax - (10 + width)) < .001f,
+                    "Combo and level share the right edge of the available playfield heading");
+                Check(Mathf.Abs(GameSession.GameplayHeadingFontSize(height) - (height < 600 ? 11 : 13) * 1.5f) <= .5f &&
+                    Mathf.Abs(GameSession.GameplayComboFontSize(height) - (height < 400 ? 11 : height < 600 ? 13 : 16) * 1.5f) <= .5f,
+                    "Score, level and combo fonts are fifty percent larger, rounded to whole font pixels");
+                Check(combo.yMin >= level.yMax && combo.yMax < 20 + PlayerLifeIcons.ProgressOffset(height),
+                    "Enlarged combo clears both the level heading and progress bar");
+            }
         }
 
         private static void CheckScoreCalculation()

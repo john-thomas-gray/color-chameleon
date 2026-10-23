@@ -9,6 +9,7 @@ namespace CandyCruisers.Editor
         public static void Run()
         {
             CheckChoreography();
+            CheckBeatSynchronization();
             CheckLayout();
             CheckApexHandoff();
             SpecialEnemyChecks.Fixture((grid, player, tongue) =>
@@ -104,6 +105,55 @@ namespace CandyCruisers.Editor
                 Check(stationary[i].Equals(independent[i]), "Player deformation cannot mutate independent icon pixels");
         }
 
+        private static void CheckBeatSynchronization()
+        {
+            SpecialEnemyChecks.Fixture((grid, player, tongue) =>
+            {
+                var music = grid.gameObject.AddComponent<GameplayMusicPlayer>();
+                music.PreviewTempo = 120;
+                music.Source.Stop();
+                var dance = player.LifeIcons.Choreography;
+                var character = CharacterVisuals.Ensure(player.gameObject);
+                var art = new GameObject("Pulse test artwork", typeof(SpriteRenderer));
+                art.transform.SetParent(player.transform, false);
+                var body = art.GetComponent<SpriteRenderer>();
+                body.sprite = player.GetComponent<SpriteRenderer>().sprite;
+                character.Configure(body, art.transform);
+                var resting = new Rect(10, 80, 200, GameSession.LevelProgressBaseHeight);
+                foreach (float beat in new[] { 0f, .5f, 1f, 9.5f, 10f })
+                {
+                    music.PreviewTime = beat * .5f;
+                    dance.Tick(.17f, music);
+                    character.RefreshBeat(beat, true);
+                    bool onBeat = beat == Mathf.Floor(beat);
+                    var bar = GameSession.LevelProgressSolidRect(resting, false, GameplayMusicPlayer.BeatPulse(beat));
+                    Check(Mathf.Abs(dance.Beat - beat) < .0001f &&
+                        Mathf.Abs(dance.Scale - (onBeat ? 1.09f : 1)) < .0001f,
+                        "Extra lives use the main music beat even after a seek or without audible playback");
+                    Check((GameSession.GameplayTextPulseScale(beat) > 1) == onBeat &&
+                        (bar.height > resting.height) == onBeat,
+                        "Lives, text and ordinary progress peak together on integer beats");
+                    Check(Mathf.Abs(character.BeatScale - (onBeat ? 1 : 1.09f)) < .0001f,
+                        "The player keeps its separate half-beat pulse");
+                }
+                foreach (int frameRate in new[] { 30, 60, 120 })
+                {
+                    for (int frame = 0; frame <= frameRate; frame++)
+                    {
+                        music.PreviewTime = frame / (float)frameRate;
+                        dance.Tick(1f / frameRate, music);
+                    }
+                    Check(Mathf.Abs(dance.Beat - 2) < .0001f && Mathf.Abs(dance.Scale - 1.09f) < .0001f,
+                        "Life timing stays on the music clock at " + frameRate + " frames per second");
+                }
+                music.PreviewTime = null;
+                float stoppedBeat = music.BeatPosition;
+                dance.Tick(5, music);
+                Check(Mathf.Abs(dance.Beat - stoppedBeat) < .0001f,
+                    "A stopped music clock cannot let extra lives drift onto their own beat");
+            });
+        }
+
         private static void CheckApexHandoff()
         {
             foreach (bool flip in new[] { false, true })
@@ -146,7 +196,8 @@ namespace CandyCruisers.Editor
                 for (int i = 0; i < 8; i++)
                 {
                     Check(player.Invulnerable && !player.RespawnProtectionActive && !player.Hit() && player.Lives == lives &&
-                        player.GetComponentsInChildren<SpriteRenderer>().All(sprite => sprite.enabled),
+                        player.GetComponentsInChildren<SpriteRenderer>().Where(sprite => sprite.GetComponentInParent<TongueShot>() == null)
+                            .All(sprite => sprite.enabled),
                         "Falling replacement rejects hits and stays solid without consuming landing protection");
                     player.TickSurvival(.1f);
                 }
@@ -168,7 +219,8 @@ namespace CandyCruisers.Editor
                 player.TickSurvival(1.43f);
                 Check(player.Invulnerable, "The airborne descent does not shorten the landing interval");
                 player.TickSurvival(.03f);
-                Check(!player.Invulnerable && player.GetComponentsInChildren<SpriteRenderer>().All(sprite => sprite.enabled) &&
+                Check(!player.Invulnerable && player.GetComponentsInChildren<SpriteRenderer>()
+                    .Where(sprite => sprite.GetComponentInParent<TongueShot>() == null).All(sprite => sprite.enabled) &&
                     player.Hit(), "Protection ends normally and restores the solid, damageable player");
             });
         }
@@ -198,8 +250,11 @@ namespace CandyCruisers.Editor
             {
                 var row = PlayerLifeIcons.RowRect(12, 0, (int)size.y);
                 var resting = PlayerLifeIcons.IconRect(row, slot);
-                var pulsing = PlayerLifeIcons.IconRect(row, slot, PlayerLifeIcons.BeatScale(.5f));
-                Check(pulsing.yMin > 26 && pulsing.yMax < PlayerLifeIcons.ProgressOffset((int)size.y) - 3,
+                var pulsing = PlayerLifeIcons.IconRect(row, slot, PlayerLifeIcons.BeatScale(0));
+                float originalSize = size.y < 400 ? 10 : size.y < 600 ? 14 : 18;
+                Check(Mathf.Abs(resting.width - originalSize * 1.3f) < .001f,
+                    "Extra lives are thirty percent larger at each layout size");
+                Check(pulsing.yMin > GameSession.GameplayHeadingHeight && pulsing.yMax < PlayerLifeIcons.ProgressOffset((int)size.y) - 3,
                     "Normal life pulses do not cover the score or progress bar");
                 var destination = new Rect(size.x / 2 - 20, size.y - 70, 40, 32);
                 Check(PlayerLifeIcons.LossDisplayRect(resting, destination, 0) == resting,
@@ -226,7 +281,7 @@ namespace CandyCruisers.Editor
                 Check(PlayerLifeIcons.LossDisplayRect(resting, destination, 1) == destination,
                     "Spent slime lands at the player position rather than breaking apart");
                 if (slot > 0)
-                    Check(resting.xMin - PlayerLifeIcons.IconRect(row, slot - 1).xMax == 4,
+                    Check(Mathf.Abs(resting.xMin - PlayerLifeIcons.IconRect(row, slot - 1).xMax - 4) < .001f,
                         "Life slots retain their compact fixed spacing");
                 Check(PlayerLifeIcons.ApexSeconds - PlayerLifeIcons.AnticipationSeconds >= .3f,
                     "The takeoff has enough time to read before the apex handoff");

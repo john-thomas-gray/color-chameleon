@@ -31,10 +31,22 @@ namespace CandyCruisers.Editor
         private static bool liveShieldPrepared;
         private static GridEnemy liveShooter;
 
-        static RuntimeGameplayChecks() => EditorApplication.update += Poll;
+        static RuntimeGameplayChecks()
+        {
+            EditorApplication.update += Poll;
+            UnityEngine.SceneManagement.SceneManager.sceneLoaded += (scene, mode) =>
+            {
+                if (!SessionState.GetBool(PendingKey, false)) return;
+                // Restart reloads the authored catalog too. Preserve this mechanics fixture's
+                // baseline before Start reserves its opening fleet, just as on initial entry.
+                foreach (var root in scene.GetRootGameObjects())
+                    foreach (var session in root.GetComponentsInChildren<GameSession>(true)) session.LevelCatalog = null;
+            };
+        }
 
         public static void Run()
         {
+            MetronomeCheckSettings.BeginRuntime(PendingKey);
             SessionState.SetBool("CandyCruisers.Tests.PreviousSpawnOverride", SpawnOverride.Enabled);
             SpawnOverride.Enabled = false;
             EditorSceneManager.OpenScene(GameplaySetup.ScenePath);
@@ -75,6 +87,9 @@ namespace CandyCruisers.Editor
                 if (phase == 0)
                 {
                     grid = GameObject.Find("Enemy Grid").GetComponent<EnemyGrid>();
+                    // Keep the baseline mechanics fixture independent of edited level assets.
+                    // Separate live level checks exercise configured palettes and bar transitions.
+                    grid.GetComponent<GameSession>().LevelCatalog = null;
                     player = GameObject.Find("Player").GetComponent<PlayerMovement>();
                     tongue = player.GetComponentInChildren<TongueShot>();
                     var framing = Camera.main.GetComponent<GameplayFraming>();
@@ -84,6 +99,8 @@ namespace CandyCruisers.Editor
                     var music = grid.GetComponent<GameplayMusicPlayer>();
                     Require(music != null && !music.Source.playOnAwake && music.Source.spatialBlend == 0,
                         "Scene creates a nonspatial gameplay music player");
+                    if (grid.GetComponent<GameSession>().OpeningWarningActive)
+                        EpilepsyWarningChecks.RunRuntime(grid.GetComponent<GameSession>());
                     if (grid.GetComponent<GameSession>().State == GameSession.RunState.MainMenu)
                     {
                         Require(grid.Model.Count == 0 && player.ControlsLocked && !player.Fire() && !music.InGameplayRun && music.ShouldPlayMusic,
@@ -95,12 +112,15 @@ namespace CandyCruisers.Editor
                             grid.GetComponent<GameSession>().StartRun();
                             return;
                         }
+                        // The opening warning releases music before asynchronous audio loading finishes.
+                        if (!music.Source.isPlaying && Time.timeSinceLevelLoad < GameSession.EpilepsyWarningSeconds + 5) return;
                         Require(music.ContainsTrack(menuClip.name) && music.Source.isPlaying,
                             "Main menu starts with local menu music");
                         int menuPosition = music.Source.timeSamples;
                         float menuBeat = music.BeatPosition;
                         grid.GetComponent<GameSession>().StartRun();
-                        Require(music.Source.clip == menuClip && music.Source.isPlaying && !music.Source.loop &&
+                        bool repeatsMenuSong = new SerializedObject(music).FindProperty("track").objectReferenceValue == menuClip;
+                        Require(music.Source.clip == menuClip && music.Source.isPlaying && music.Source.loop == repeatsMenuSong &&
                             music.Source.timeSamples >= menuPosition && music.Source.timeSamples - menuPosition < menuClip.frequency / 10 &&
                             music.BeatPosition >= menuBeat && music.BeatPosition - menuBeat < .25f,
                             "The real menu-to-gameplay transition preserves the playing song, sample position and musical beat");
@@ -442,6 +462,7 @@ namespace CandyCruisers.Editor
                     PurpleYellowSpecialChecks.Run();
                     PresentationChecks.Run();
                     MenuChecks.Run();
+                    MetronomeOptionsChecks.Run();
                     WaveTransitionChecks.RunRefillDelayEnvelope();
                     SoundEffectsChecks.Run();
                     MissileFlightSoundChecks.Run();
@@ -549,6 +570,7 @@ namespace CandyCruisers.Editor
             }
             catch (Exception error)
             {
+                MetronomeCheckSettings.EndRuntime(PendingKey);
                 SessionState.SetBool(PendingKey, false);
                 SpawnOverride.Enabled = SessionState.GetBool("CandyCruisers.Tests.PreviousSpawnOverride", false);
                 Debug.LogException(error);
@@ -558,6 +580,7 @@ namespace CandyCruisers.Editor
 
         private static void CompleteRun()
         {
+                    MetronomeCheckSettings.EndRuntime(PendingKey);
                     SessionState.SetBool(PendingKey, false);
                     SpawnOverride.Enabled = SessionState.GetBool("CandyCruisers.Tests.PreviousSpawnOverride", false);
                     Debug.Log(previewOnly ? "Ability preview captured." :

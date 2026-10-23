@@ -50,6 +50,7 @@ namespace CandyCruisers.Editor
             var sprites = art.Root.GetComponentsInChildren<SpriteRenderer>(true);
             var visible = Array.ConvertAll(sprites, sprite => sprite.enabled);
             var originalPosition = player.transform.position;
+            var originalArtworkPosition = art.Root.localPosition;
             var camera = Camera.main;
             var framing = camera.GetComponent<GameplayFraming>();
             var previousTarget = camera.targetTexture;
@@ -74,6 +75,9 @@ namespace CandyCruisers.Editor
                             if (held) cover.HoldPlayer(art.Root);
                             else cover.ShowDeath(null);
                             cover.Present(held ? 1 : 0);
+                            // Probe rim clipping with the artwork at the rim; the death cinematic
+                            // normally moves held art to screen center as the cover becomes opaque.
+                            art.Root.localPosition = originalArtworkPosition;
                             foreach (var point in new[] { new Vector3(-2.95f, -4.6f), new Vector3(2.95f, -4.6f),
                                 new Vector3(0, 5.45f), new Vector3(0, -5.45f) })
                             {

@@ -106,18 +106,19 @@ namespace CandyCruisers
             StartNextGain(music);
         }
 
-        public static float BeatScale(float beat) => 1 + .09f * GameplayMusicPlayer.BeatPulse(beat, true);
+        public static float BeatScale(float beat) => 1 + .09f * GameplayMusicPlayer.BeatPulse(beat);
+        public const float SizeScale = 1.3f;
         public static Rect RowRect(float x, float y, int viewHeight)
         {
-            float size = viewHeight < 400 ? 10 : viewHeight < 600 ? 14 : 18;
-            float center = viewHeight < 400 ? 33 : viewHeight < 600 ? 38 : 50;
+            float size = (viewHeight < 400 ? 10 : viewHeight < 600 ? 14 : 18) * SizeScale;
+            float center = viewHeight < 400 ? 46 : 50;
             return new Rect(x + 2, y + center - size / 2, 96, size);
         }
-        public static float ProgressOffset(int viewHeight) => viewHeight < 400 ? 42 : viewHeight < 600 ? 58 : 78;
+        public static float ProgressOffset(int viewHeight) => viewHeight < 400 ? 68 : viewHeight < 600 ? 76 : 78;
         public static Rect IconRect(Rect row, int slot, float scale = 1)
         {
             float cell = row.width / LayoutSlots;
-            float size = Mathf.Min(20, Mathf.Min(row.height, cell - 8));
+            float size = Mathf.Min(20 * SizeScale, Mathf.Min(row.height, cell - 8));
             var center = new Vector2(row.x + cell * .5f + slot * (size + 4), row.center.y);
             size *= scale;
             return new Rect(center.x - size / 2, center.y - size / 2, size, size);

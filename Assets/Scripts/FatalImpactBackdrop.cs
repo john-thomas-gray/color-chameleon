@@ -25,14 +25,13 @@ namespace CandyCruisers
         private float aspect, depth;
         public bool Active => age >= 0 && age < Duration;
 
-        public static FatalImpactBackdrop Create(Transform owner, Vector3 position, Material material, int level)
+        public static FatalImpactBackdrop Create(Transform owner, Vector3 position, Material material, IReadOnlyList<EnemyColor> colors)
         {
             var root = new GameObject("Fatal impact backdrop", typeof(MeshFilter), typeof(MeshRenderer));
             root.transform.SetParent(owner, false);
             var impact = root.AddComponent<FatalImpactBackdrop>();
             impact.origin = position;
-            foreach (EnemyColor color in System.Enum.GetValues(typeof(EnemyColor)))
-                if (RunProgress.IsUnlocked(color, level)) impact.particleColors.Add(color);
+            if (colors != null) impact.particleColors.AddRange(colors);
             impact.visual = root.GetComponent<MeshRenderer>();
             impact.visual.sharedMaterial = material;
             impact.visual.sortingOrder = SortingOrder;

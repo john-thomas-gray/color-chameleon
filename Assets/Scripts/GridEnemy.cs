@@ -8,16 +8,17 @@ namespace CandyCruisers
         [SerializeField] private int column;
         [SerializeField] private int row;
         private EnemyGrid owner;
+        private GridModel.Occupant occupant;
         private CharacterVisuals visuals;
         public CharacterVisuals Visuals => visuals != null ? visuals : visuals = CharacterVisuals.Ensure(gameObject);
         public Bounds HitBounds => Visuals.HitBounds;
         public int Id => GetInstanceID();
-        public EnemyColor Color => color;
-        public int Column => column;
-        public int Row => row;
+        public EnemyColor Color => occupant != null ? occupant.Color : color;
+        public int Column => occupant != null ? occupant.Column : column;
+        public int Row => occupant != null ? occupant.Row : row;
         public bool IsSpecial { get; private set; }
         public int Tier => IsSpecial ? 2 : 1;
-        internal void Promote() { if (color != EnemyColor.Orange) IsSpecial = true; }
+        internal void Promote() { if (Color != EnemyColor.Orange) IsSpecial = true; }
 
         public void Configure(EnemyColor newColor, int newColumn, int newRow)
         {
@@ -26,7 +27,12 @@ namespace CandyCruisers
             IsSpecial = false;
         }
 
-        internal void Bind(EnemyGrid grid) => owner = grid;
+        internal void Bind(EnemyGrid grid)
+        {
+            if (occupant != null) { color = occupant.Color; column = occupant.Column; row = occupant.Row; }
+            owner = grid;
+            occupant = grid != null ? grid.Model.Find(Id) : null;
+        }
         internal void SetCell(int newColumn, int newRow) { column = newColumn; row = newRow; }
         internal void SetColor(EnemyColor newColor)
         {
@@ -47,6 +53,9 @@ namespace CandyCruisers
 
     public static class EnemyPalette
     {
+        public static System.Collections.Generic.IReadOnlyList<EnemyColor> Colors { get; } =
+            System.Array.AsReadOnly((EnemyColor[])System.Enum.GetValues(typeof(EnemyColor)));
+        public static EnemyColor CycleColor(int index) => Colors[((index % Colors.Count) + Colors.Count) % Colors.Count];
         public static Color Get(EnemyColor color)
         {
             switch (color)
